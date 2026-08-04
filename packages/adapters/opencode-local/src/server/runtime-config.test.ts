@@ -9,6 +9,9 @@ const cleanupPaths = new Set<string>();
 afterEach(async () => {
   await Promise.all(
     [...cleanupPaths].map(async (filepath) => {
+      await fs.chmod(filepath, 0o755).catch(() => undefined);
+      await fs.chmod(path.join(filepath, "opencode"), 0o755).catch(() => undefined);
+      await fs.chmod(path.join(filepath, "opencode", "opencode.json"), 0o644).catch(() => undefined);
       await fs.rm(filepath, { recursive: true, force: true });
       cleanupPaths.delete(filepath);
     }),
@@ -63,6 +66,40 @@ describe("prepareOpenCodeRuntimeConfig", () => {
     await prepared.cleanup();
     cleanupPaths.delete(prepared.env.XDG_CONFIG_HOME);
     await expect(fs.access(prepared.env.XDG_CONFIG_HOME)).rejects.toThrow();
+  });
+
+  it("rewrites a read-only mounted source config with worker-owned permissions", async () => {
+    const configHome = await makeConfigHome({
+      permission: { read: "allow" },
+      theme: "from-configmap",
+    });
+    const sourceConfigPath = path.join(configHome, "opencode", "opencode.json");
+    await fs.chmod(path.dirname(sourceConfigPath), 0o555);
+    await fs.chmod(sourceConfigPath, 0o444);
+
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome },
+      config: {},
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+
+    const runtimeConfigPath = path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json");
+    const runtimeConfig = JSON.parse(await fs.readFile(runtimeConfigPath, "utf8")) as Record<string, unknown>;
+    const runtimeStat = await fs.stat(runtimeConfigPath);
+    const runtimeDirStat = await fs.stat(path.dirname(runtimeConfigPath));
+    expect(runtimeConfig).toMatchObject({
+      theme: "from-configmap",
+      permission: { read: "allow", external_directory: "allow" },
+    });
+    expect(runtimeStat.uid).toBe(typeof process.getuid === "function" ? process.getuid() : runtimeStat.uid);
+    expect(runtimeDirStat.uid).toBe(typeof process.getuid === "function" ? process.getuid() : runtimeDirStat.uid);
+    expect((await fs.stat(runtimeConfigPath)).mode & 0o777).toBe(0o600);
+    expect(runtimeDirStat.mode & 0o777).toBe(0o700);
+    await expect(fs.readdir(path.dirname(runtimeConfigPath))).resolves.not.toContain(
+      expect.stringMatching(/\.tmp$/),
+    );
+
+    await prepared.cleanup();
   });
 
   it("merges custom providers from PAPERCLIP_OPENCODE_PROVIDERS into the config", async () => {

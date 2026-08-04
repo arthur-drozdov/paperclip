@@ -343,18 +343,22 @@ export function buildExecutionWorkspaceAdapterConfig(input: {
   );
   const hasWorkspaceControl = projectHasPolicy || issueHasWorkspaceOverrides || input.legacyUseProjectWorkspace === false;
 
-  if (hasWorkspaceControl) {
-    if (input.mode === "isolated_workspace") {
-      const strategy =
-        input.issueSettings?.workspaceStrategy ??
-        input.projectPolicy?.workspaceStrategy ??
-        parseExecutionWorkspaceStrategy(nextConfig.workspaceStrategy) ??
-        ({ type: "git_worktree" } satisfies ExecutionWorkspaceStrategy);
-      nextConfig.workspaceStrategy = strategy as unknown as Record<string, unknown>;
-    } else {
-      delete nextConfig.workspaceStrategy;
-    }
+  // The resolved mode is authoritative. Retaining an agent-level git_worktree
+  // strategy while the project resolved to a shared/agent-default workspace
+  // makes realization run Git commands in an empty managed project directory.
+  // A worktree strategy is valid only for an explicitly isolated workspace.
+  if (input.mode === "isolated_workspace") {
+    const strategy =
+      input.issueSettings?.workspaceStrategy ??
+      input.projectPolicy?.workspaceStrategy ??
+      parseExecutionWorkspaceStrategy(nextConfig.workspaceStrategy) ??
+      ({ type: "git_worktree" } satisfies ExecutionWorkspaceStrategy);
+    nextConfig.workspaceStrategy = strategy as unknown as Record<string, unknown>;
+  } else {
+    delete nextConfig.workspaceStrategy;
+  }
 
+  if (hasWorkspaceControl) {
     if (input.mode === "agent_default") {
       delete nextConfig.workspaceRuntime;
     } else if (input.issueSettings?.workspaceRuntime) {

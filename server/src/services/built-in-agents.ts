@@ -22,6 +22,7 @@ import { companySkillService } from "./company-skills.js";
 import { routineService } from "./routines.js";
 import { accessService } from "./access.js";
 import { listAdapterModels } from "../adapters/registry.js";
+import { instanceSettingsService } from "./instance-settings.js";
 
 export type BuiltInAgentStatus = "not_provisioned" | "pending_approval" | "needs_setup" | "ready" | "paused";
 
@@ -1986,6 +1987,19 @@ export function builtInAgentService(db: Db) {
 }
 
 export async function reconcileBuiltInAgentsOnStartup(db: Db) {
+  const experimental = await instanceSettingsService(db).getExperimental();
+  if (experimental.enableBuiltInAgents !== true) {
+    return {
+      scanned: 0,
+      reconciled: 0,
+      unknown: 0,
+      duplicates: 0,
+      autoEnsured: 0,
+      pendingApprovals: 0,
+      defaultGrantsEnsured: 0,
+      companyFailures: 0,
+    };
+  }
   const svc = builtInAgentService(db);
   const companyRows = await db
     .select({ id: companies.id })

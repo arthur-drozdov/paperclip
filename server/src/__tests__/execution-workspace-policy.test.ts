@@ -293,6 +293,20 @@ describe("execution workspace policy helpers", () => {
     expect(agentDefault.workspaceRuntime).toBeUndefined();
   });
 
+  it("does not leak an agent worktree strategy into an uncontrolled shared project", () => {
+    const result = buildExecutionWorkspaceAdapterConfig({
+      agentConfig: {
+        workspaceStrategy: { type: "git_worktree", baseRef: "origin/main" },
+      },
+      projectPolicy: null,
+      issueSettings: null,
+      mode: "shared_workspace",
+      legacyUseProjectWorkspace: null,
+    });
+
+    expect(result.workspaceStrategy).toBeUndefined();
+  });
+
   it("parses persisted JSON payloads into typed project and issue workspace settings", () => {
     expect(
       parseProjectExecutionWorkspacePolicy({

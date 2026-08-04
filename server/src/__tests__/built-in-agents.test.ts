@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
   activityLog,
@@ -40,6 +40,7 @@ import {
 } from "../services/built-in-agents.ts";
 import { readBuiltInAgentMarker, withBuiltInAgentMarker } from "../services/built-in-agent-metadata.ts";
 import { issueThreadInteractionService } from "../services/issue-thread-interactions.ts";
+import { instanceSettingsService } from "../services/instance-settings.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -121,6 +122,10 @@ describeEmbeddedPostgres("built-in agents", () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-built-in-agents-");
     db = createDb(tempDb.connectionString);
   }, 20_000);
+
+  beforeEach(async () => {
+    await instanceSettingsService(db).updateExperimental({ enableBuiltInAgents: true });
+  });
 
   afterEach(async () => {
     await db.delete(routineTriggers);
@@ -653,6 +658,26 @@ describeEmbeddedPostgres("built-in agents", () => {
     expect(coachGrantKeys).toEqual(expect.arrayContaining(["agents:suggest-changes", "skills:suggest-changes"]));
     expect(coachGrantKeys).not.toContain("agents:configure");
     expect(coachGrantKeys).not.toContain("skills:create");
+  });
+
+  it("does not provision or reconcile bundled agents when the feature is disabled", async () => {
+    await instanceSettingsService(db).updateExperimental({ enableBuiltInAgents: false });
+    const companyId = await seedCompany({ requireApproval: false });
+
+    const result = await reconcileBuiltInAgentsOnStartup(db);
+
+    expect(result).toEqual({
+      scanned: 0,
+      reconciled: 0,
+      unknown: 0,
+      duplicates: 0,
+      autoEnsured: 0,
+      pendingApprovals: 0,
+      defaultGrantsEnsured: 0,
+      companyFailures: 0,
+    });
+    const agentRows = await db.select().from(agents).where(eq(agents.companyId, companyId));
+    expect(agentRows).toHaveLength(0);
   });
 
   it("recreates missing managed resource bindings idempotently during concurrent reconcile", async () => {

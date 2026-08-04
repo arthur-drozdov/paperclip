@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import {
   activityLog,
@@ -25,6 +25,7 @@ import {
 import { companyService } from "../services/companies.js";
 import { readBuiltInAgentMarker } from "../services/built-in-agent-metadata.js";
 import { reconcileBuiltInAgentsOnStartup } from "../services/built-in-agents.js";
+import { instanceSettingsService } from "../services/instance-settings.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -43,6 +44,10 @@ describeEmbeddedPostgres("companyService", () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-company-service-");
     db = createDb(tempDb.connectionString);
   }, 20_000);
+
+  beforeEach(async () => {
+    await instanceSettingsService(db).updateExperimental({ enableBuiltInAgents: false });
+  });
 
   afterEach(async () => {
     await db.delete(routineTriggers);
@@ -82,6 +87,7 @@ describeEmbeddedPostgres("companyService", () => {
   });
 
   it("auto-provisions one paused Reflection Coach bundle for a freshly created company", async () => {
+    await instanceSettingsService(db).updateExperimental({ enableBuiltInAgents: true });
     const created = await companyService(db).create({
       name: "Fresh Company",
     });
@@ -126,6 +132,13 @@ describeEmbeddedPostgres("companyService", () => {
     await reconcileBuiltInAgentsOnStartup(db);
     const afterReconcileRows = await db.select().from(agents).where(eq(agents.companyId, created.id));
     expect(afterReconcileRows.filter((row) => readBuiltInAgentMarker(row.metadata)?.key === "reflection-coach")).toHaveLength(1);
+  });
+
+  it("does not auto-provision bundled agents for a freshly created company when disabled", async () => {
+    const created = await companyService(db).create({ name: "No Optional Agents" });
+
+    const agentRows = await db.select().from(agents).where(eq(agents.companyId, created.id));
+    expect(agentRows.filter((row) => readBuiltInAgentMarker(row.metadata))).toHaveLength(0);
   });
 
   it("archives companies by pausing runnable agents and cancelling active runs", async () => {

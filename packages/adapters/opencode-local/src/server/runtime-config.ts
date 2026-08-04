@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { asBoolean } from "@paperclipai/adapter-utils/server-utils";
 
 type PreparedOpenCodeRuntimeConfig = {
@@ -102,6 +103,28 @@ async function readJsonObject(filepath: string): Promise<Record<string, unknown>
   }
 }
 
+/**
+ * Install a run-scoped config atomically.
+ *
+ * The source OpenCode config is commonly mounted from a ConfigMap or another
+ * read-only volume. `fs.cp` intentionally preserves that file's mode, so a
+ * later in-place `writeFile` can fail even though the run-scoped directory is
+ * writable. Staging a new file in the same directory and renaming it avoids
+ * depending on the copied target's permissions (and also replaces a copied
+ * symlink rather than following it).
+ */
+async function writeRuntimeConfigAtomically(filepath: string, contents: string): Promise<void> {
+  const temporaryPath = `${filepath}.paperclip-${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await fs.chmod(temporaryPath, 0o600);
+    await fs.rename(temporaryPath, filepath);
+  } catch (error) {
+    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function prepareOpenCodeRuntimeConfig(input: {
   env: Record<string, string>;
   config: Record<string, unknown>;
@@ -134,7 +157,7 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   const runtimeConfigDir = path.join(runtimeConfigHome, "opencode");
   const runtimeConfigPath = path.join(runtimeConfigDir, "opencode.json");
 
-  await fs.mkdir(runtimeConfigDir, { recursive: true });
+  await fs.mkdir(runtimeConfigDir, { recursive: true, mode: 0o700 });
   try {
     await fs.cp(sourceConfigDir, runtimeConfigDir, {
       recursive: true,
@@ -147,6 +170,9 @@ export async function prepareOpenCodeRuntimeConfig(input: {
       throw err;
     }
   }
+  // A copied source directory may carry permissive or read-only mount modes.
+  // Keep the run-scoped configuration private and writable by its owner.
+  await fs.chmod(runtimeConfigDir, 0o700);
 
   const existingConfig = await readJsonObject(runtimeConfigPath);
   const existingPermission = isPlainObject(existingConfig.permission)
@@ -227,7 +253,7 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     nextConfig.small_model = smallModel;
     notes.push(`Pinned OpenCode small_model to ${smallModel}.`);
   }
-  await fs.writeFile(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+  await writeRuntimeConfigAtomically(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
 
   return {
     env: {
