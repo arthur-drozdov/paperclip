@@ -5,6 +5,7 @@ import {
   asString,
   ensurePathInEnv,
   runChildProcess,
+  sanitizeMinimalInheritedPaperclipEnv,
 } from "@paperclipai/adapter-utils/server-utils";
 import { isValidOpenCodeModelId } from "../index.js";
 
@@ -94,13 +95,18 @@ function hashValue(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function discoveryCacheKey(command: string, cwd: string, env: Record<string, string>) {
+function discoveryCacheKey(
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  minimalInheritedEnvironment = false,
+) {
   const envKey = Object.entries(env)
     .filter(([key]) => !isVolatileEnvKey(key))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${hashValue(value)}`)
     .join("\n");
-  return `${command}\n${cwd}\n${envKey}`;
+  return `${command}\n${cwd}\nminimalInheritedEnvironment=${minimalInheritedEnvironment}\n${envKey}`;
 }
 
 function pruneExpiredDiscoveryCache(now: number) {
@@ -113,24 +119,31 @@ export async function discoverOpenCodeModels(input: {
   command?: unknown;
   cwd?: unknown;
   env?: unknown;
+  minimalInheritedEnvironment?: boolean;
 } = {}): Promise<AdapterModel[]> {
   const command = resolveOpenCodeCommand(input.command);
   const cwd = asString(input.cwd, process.cwd());
   const env = normalizeEnv(input.env);
-  // Ensure HOME points to the actual running user's home directory.
-  // When the server is started via `runuser -u <user>`, HOME may still
-  // reflect the parent process (e.g. /root), causing OpenCode to miss
-  // provider auth credentials stored under the target user's home.
+  // Ensure HOME points to the actual running user's home directory only when
+  // the caller did not deliberately supply a run-scoped HOME. Minimal workers
+  // use the latter to avoid inheriting the Paperclip server's auth/config tree.
   let resolvedHome: string | undefined;
-  try {
-    resolvedHome = os.userInfo().homedir || undefined;
-  } catch {
-    // os.userInfo() throws a SystemError when the current UID has no
-    // /etc/passwd entry (e.g. `docker run --user 1234` with a minimal
-    // image). Fall back to process.env.HOME.
+  if (!env.HOME) {
+    try {
+      resolvedHome = os.userInfo().homedir || undefined;
+    } catch {
+      // os.userInfo() throws a SystemError when the current UID has no
+      // /etc/passwd entry (e.g. `docker run --user 1234` with a minimal
+      // image). Fall back to process.env.HOME.
+    }
   }
   // Prevent OpenCode from writing an opencode.json into the working directory.
-  const runtimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...env, ...(resolvedHome ? { HOME: resolvedHome } : {}), OPENCODE_DISABLE_PROJECT_CONFIG: "true" }));
+  const runtimeEnv = normalizeEnv(ensurePathInEnv({
+    ...(input.minimalInheritedEnvironment ? sanitizeMinimalInheritedPaperclipEnv(process.env) : process.env),
+    ...env,
+    ...(resolvedHome ? { HOME: resolvedHome } : {}),
+    OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+  }));
 
   const result = await runChildProcess(
     `opencode-models-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -142,6 +155,7 @@ export async function discoverOpenCodeModels(input: {
       timeoutSec: MODELS_DISCOVERY_TIMEOUT_MS / 1000,
       graceSec: 3,
       onLog: async () => {},
+      minimalInheritedEnvironment: input.minimalInheritedEnvironment,
     },
   );
 
@@ -160,17 +174,23 @@ export async function discoverOpenCodeModelsCached(input: {
   command?: unknown;
   cwd?: unknown;
   env?: unknown;
+  minimalInheritedEnvironment?: boolean;
 } = {}): Promise<AdapterModel[]> {
   const command = resolveOpenCodeCommand(input.command);
   const cwd = asString(input.cwd, process.cwd());
   const env = normalizeEnv(input.env);
-  const key = discoveryCacheKey(command, cwd, env);
+  const key = discoveryCacheKey(command, cwd, env, input.minimalInheritedEnvironment);
   const now = Date.now();
   pruneExpiredDiscoveryCache(now);
   const cached = discoveryCache.get(key);
   if (cached && cached.expiresAt > now) return cached.models;
 
-  const models = await discoverOpenCodeModels({ command, cwd, env });
+  const models = await discoverOpenCodeModels({
+    command,
+    cwd,
+    env,
+    minimalInheritedEnvironment: input.minimalInheritedEnvironment,
+  });
   discoveryCache.set(key, { expiresAt: now + MODELS_CACHE_TTL_MS, models });
   return models;
 }
@@ -186,6 +206,7 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   command?: unknown;
   cwd?: unknown;
   env?: unknown;
+  minimalInheritedEnvironment?: boolean;
 }): Promise<AdapterModel[]> {
   const model = requireOpenCodeModelId(input.model);
 
@@ -195,7 +216,12 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   // we still enforce the provider/model format above and do not second-guess
   // the configured model. Prefer the explicit run env, then the process env.
   const env = normalizeEnv(input.env);
-  if (isTruthyEnvFlag(env.OPENCODE_ALLOW_ALL_MODELS ?? process.env.OPENCODE_ALLOW_ALL_MODELS)) {
+  if (
+    isTruthyEnvFlag(
+      env.OPENCODE_ALLOW_ALL_MODELS ??
+        (input.minimalInheritedEnvironment ? undefined : process.env.OPENCODE_ALLOW_ALL_MODELS),
+    )
+  ) {
     return [{ id: model, label: model }];
   }
 
@@ -203,6 +229,7 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
     command: input.command,
     cwd: input.cwd,
     env: input.env,
+    minimalInheritedEnvironment: input.minimalInheritedEnvironment,
   });
 
   if (models.length === 0) {

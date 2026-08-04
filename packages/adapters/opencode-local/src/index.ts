@@ -118,6 +118,7 @@ Core fields:
 - model (string, required): OpenCode model id in provider/model format (for example anthropic/claude-sonnet-4-5)
 - variant (string, optional): provider-specific reasoning/profile variant passed as --variant (for example minimal|low|medium|high|xhigh|max)
 - dangerouslySkipPermissions (boolean, optional): inject a runtime OpenCode config that allows \`external_directory\` access without interactive prompts; defaults to true for unattended Paperclip runs
+- minimalEnvironment (boolean, optional): run with a fresh temporary HOME/XDG tree and inherit only PATH, locale, temp-directory, and trust-store variables from the Paperclip server; defaults to false. Explicit adapter env and the task-scoped Paperclip API token still apply.
 - promptTemplate (string, optional): run prompt template
 - command (string, optional): defaults to "opencode"
 - extraArgs (string[], optional): additional CLI args
@@ -139,4 +140,7 @@ Notes:
 - When \`dangerouslySkipPermissions\` is enabled, Paperclip injects a temporary \
   runtime config with \`permission.external_directory=allow\` so headless runs do \
   not stall on approval prompts.
+- \`minimalEnvironment\` is environment hygiene, not a filesystem sandbox: a local \\
+  worker still runs in the same container and Unix identity as Paperclip. Do not \\
+  assign it sealed-test, host-credential, or otherwise isolation-sensitive work.
 `;

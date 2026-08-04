@@ -391,6 +391,118 @@ describe("adapter skill snapshots", () => {
 });
 
 describe("runChildProcess", () => {
+  it("does not inherit server authority when minimal environment is requested", async () => {
+    const keys = [
+      "HOME",
+      "XDG_CONFIG_HOME",
+      "CODEX_HOME",
+      "DATABASE_URL",
+      "OPENAI_API_KEY",
+      "PAPERCLIP_AGENT_JWT_SECRET",
+      "PAPERCLIP_SECRETS_MASTER_KEY",
+      "PAPERCLIP_SIGNING_SECRET",
+      "BETTER_AUTH_SECRET",
+      "PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN",
+      "PAPERCLIP_API_KEY",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "HINDSIGHT_API_TOKEN",
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    Object.assign(process.env, {
+      HOME: "/paperclip/server-home",
+      XDG_CONFIG_HOME: "/paperclip/server-config",
+      CODEX_HOME: "/paperclip/server-codex",
+      DATABASE_URL: "postgres://server-only",
+      OPENAI_API_KEY: "server-openai-key",
+      PAPERCLIP_AGENT_JWT_SECRET: "server-jwt",
+      PAPERCLIP_SECRETS_MASTER_KEY: "server-master",
+      PAPERCLIP_SIGNING_SECRET: "server-signing",
+      BETTER_AUTH_SECRET: "server-auth",
+      PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN: "server-cloud",
+      PAPERCLIP_API_KEY: "server-api",
+      AWS_ACCESS_KEY_ID: "server-aws-access",
+      AWS_SECRET_ACCESS_KEY: "server-aws-secret",
+      AWS_SESSION_TOKEN: "server-aws-session",
+      HINDSIGHT_API_TOKEN: "server-memory",
+    });
+
+    try {
+      const result = await runChildProcess(
+        randomUUID(),
+        process.execPath,
+        [
+          "-e",
+          [
+            "process.stdout.write(JSON.stringify({",
+            "home: process.env.HOME ?? null,",
+            "xdgConfig: process.env.XDG_CONFIG_HOME ?? null,",
+            "codexHome: process.env.CODEX_HOME ?? null,",
+            "databaseUrl: process.env.DATABASE_URL ?? null,",
+            "openAiKey: process.env.OPENAI_API_KEY ?? null,",
+            "jwt: process.env.PAPERCLIP_AGENT_JWT_SECRET ?? null,",
+            "master: process.env.PAPERCLIP_SECRETS_MASTER_KEY ?? null,",
+            "signing: process.env.PAPERCLIP_SIGNING_SECRET ?? null,",
+            "auth: process.env.BETTER_AUTH_SECRET ?? null,",
+            "cloud: process.env.PAPERCLIP_CLOUD_TENANT_SERVER_TOKEN ?? null,",
+            "serverApi: process.env.PAPERCLIP_API_KEY ?? null,",
+            "awsAccess: process.env.AWS_ACCESS_KEY_ID ?? null,",
+            "awsSecret: process.env.AWS_SECRET_ACCESS_KEY ?? null,",
+            "awsSession: process.env.AWS_SESSION_TOKEN ?? null,",
+            "memory: process.env.HINDSIGHT_API_TOKEN ?? null,",
+            "path: process.env.PATH ?? null,",
+            "runId: process.env.PAPERCLIP_RUN_ID ?? null,",
+            "explicit: process.env.EXPLICIT_NON_SECRET ?? null",
+            "}));",
+          ].join(""),
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            HOME: "/tmp/paperclip-run-home",
+            XDG_CONFIG_HOME: "/tmp/paperclip-run-config",
+            PAPERCLIP_AGENT_ID: "agent-1",
+            PAPERCLIP_RUN_ID: "run-1",
+            EXPLICIT_NON_SECRET: "configured",
+          },
+          timeoutSec: 5,
+          graceSec: 1,
+          onLog: async () => {},
+          minimalInheritedEnvironment: true,
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        home: "/tmp/paperclip-run-home",
+        xdgConfig: "/tmp/paperclip-run-config",
+        codexHome: null,
+        databaseUrl: null,
+        openAiKey: null,
+        jwt: null,
+        master: null,
+        signing: null,
+        auth: null,
+        cloud: null,
+        serverApi: null,
+        awsAccess: null,
+        awsSecret: null,
+        awsSession: null,
+        memory: null,
+        path: expect.any(String),
+        runId: "run-1",
+        explicit: "configured",
+      });
+    } finally {
+      for (const key of keys) {
+        const value = previous[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it("does not arm a timeout when timeoutSec is 0", async () => {
     const result = await runChildProcess(
       randomUUID(),

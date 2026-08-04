@@ -129,9 +129,14 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   env: Record<string, string>;
   config: Record<string, unknown>;
   targetIsRemote?: boolean;
+  /**
+   * Create a fresh run-scoped HOME/XDG tree and do not implicitly import the
+   * Paperclip server's ambient OpenCode config/provider environment.
+   */
+  minimalEnvironment?: boolean;
 }): Promise<PreparedOpenCodeRuntimeConfig> {
   const skipPermissions = asBoolean(input.config.dangerouslySkipPermissions, true);
-  if (!skipPermissions) {
+  if (!skipPermissions && !input.minimalEnvironment) {
     return {
       env: input.env,
       notes: [],
@@ -156,18 +161,34 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   const runtimeConfigHome = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-opencode-config-"));
   const runtimeConfigDir = path.join(runtimeConfigHome, "opencode");
   const runtimeConfigPath = path.join(runtimeConfigDir, "opencode.json");
+  const runtimeHome = input.minimalEnvironment ? path.join(runtimeConfigHome, "home") : null;
 
   await fs.mkdir(runtimeConfigDir, { recursive: true, mode: 0o700 });
-  try {
-    await fs.cp(sourceConfigDir, runtimeConfigDir, {
-      recursive: true,
-      force: true,
-      errorOnExist: false,
-      dereference: false,
-    });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") {
-      throw err;
+  if (runtimeHome) {
+    await fs.mkdir(runtimeHome, { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(runtimeHome, ".cache"), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(runtimeHome, ".local", "share"), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(runtimeHome, ".local", "state"), { recursive: true, mode: 0o700 });
+  }
+
+  // A minimal worker must not copy the server's ambient ~/.config/opencode
+  // tree. An explicitly configured XDG_CONFIG_HOME is an intentional opt-in
+  // source; otherwise start from an empty run-scoped config and only merge
+  // values supplied by the run itself.
+  const explicitConfigHome =
+    typeof input.env.XDG_CONFIG_HOME === "string" && input.env.XDG_CONFIG_HOME.trim().length > 0;
+  if (!input.minimalEnvironment || explicitConfigHome) {
+    try {
+      await fs.cp(sourceConfigDir, runtimeConfigDir, {
+        recursive: true,
+        force: true,
+        errorOnExist: false,
+        dereference: false,
+      });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") {
+        throw err;
+      }
     }
   }
   // A copied source directory may carry permissive or read-only mount modes.
@@ -178,9 +199,16 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   const existingPermission = isPlainObject(existingConfig.permission)
     ? existingConfig.permission
     : {};
-  const notes = [
-    "Injected runtime OpenCode config with permission.external_directory=allow to avoid headless approval prompts.",
-  ];
+  const notes = skipPermissions
+    ? [
+        "Injected runtime OpenCode config with permission.external_directory=allow to avoid headless approval prompts.",
+      ]
+    : [];
+  if (runtimeHome) {
+    notes.push(
+      "Prepared a fresh run-scoped HOME/XDG tree; ambient tool homes and config locations are not inherited.",
+    );
+  }
 
   // Merge gateway/custom provider definitions supplied via PAPERCLIP_OPENCODE_PROVIDERS
   // (a JSON object in OpenCode's `provider` shape). OpenCode resolves a `--model
@@ -189,9 +217,11 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   // gateway model (e.g. an EU LLM gateway exposing OpenAI-compatible /v1) requires a
   // custom provider with an explicit models map. We accept it as config (not
   // hard-coded) so the gateway URL, key env, and model list stay declarative.
-  const resolveEnv = (name: string): string | undefined => input.env[name] ?? process.env[name];
+  const resolveEnv = (name: string): string | undefined =>
+    input.env[name] ?? (input.minimalEnvironment ? undefined : process.env[name]);
   const gatewayProviders = parseProviderConfig(
-    input.env.PAPERCLIP_OPENCODE_PROVIDERS ?? process.env.PAPERCLIP_OPENCODE_PROVIDERS,
+    input.env.PAPERCLIP_OPENCODE_PROVIDERS ??
+      (input.minimalEnvironment ? undefined : process.env.PAPERCLIP_OPENCODE_PROVIDERS),
     resolveEnv,
     notes,
   );
@@ -233,11 +263,13 @@ export async function prepareOpenCodeRuntimeConfig(input: {
 
   const nextConfig: Record<string, unknown> = {
     ...existingConfig,
-    permission: {
+  };
+  if (skipPermissions) {
+    nextConfig.permission = {
       ...existingPermission,
       external_directory: "allow",
-    },
-  };
+    };
+  }
   if (Object.keys(nextProvider).length > 0) {
     nextConfig.provider = nextProvider;
   }
@@ -248,7 +280,10 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   // for the anthropic provider); when that provider is repointed at a gateway that
   // does not serve that exact model, the title-gen call fails and aborts the run.
   // Setting small_model to a gateway-served model keeps every call on supported models.
-  const smallModel = (input.env.PAPERCLIP_OPENCODE_SMALL_MODEL ?? process.env.PAPERCLIP_OPENCODE_SMALL_MODEL)?.trim();
+  const smallModel = (
+    input.env.PAPERCLIP_OPENCODE_SMALL_MODEL ??
+    (input.minimalEnvironment ? undefined : process.env.PAPERCLIP_OPENCODE_SMALL_MODEL)
+  )?.trim();
   if (smallModel) {
     nextConfig.small_model = smallModel;
     notes.push(`Pinned OpenCode small_model to ${smallModel}.`);
@@ -259,6 +294,14 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     env: {
       ...input.env,
       XDG_CONFIG_HOME: runtimeConfigHome,
+      ...(runtimeHome
+        ? {
+            HOME: runtimeHome,
+            XDG_CACHE_HOME: path.join(runtimeHome, ".cache"),
+            XDG_DATA_HOME: path.join(runtimeHome, ".local", "share"),
+            XDG_STATE_HOME: path.join(runtimeHome, ".local", "state"),
+          }
+        : {}),
     },
     notes,
     cleanup: async () => {

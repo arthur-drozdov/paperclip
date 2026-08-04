@@ -155,6 +155,11 @@ export interface AdapterExecutionTargetProcessOptions {
    */
   runLogTail?: SandboxRunLogTailFactory | null;
   localProcessSandbox?: LocalProcessSandboxOptions | null;
+  /**
+   * Use a strict ambient-process environment allowlist for a local target.
+   * Explicit env entries remain available to the child.
+   */
+  minimalInheritedEnvironment?: boolean;
 }
 
 export interface AdapterExecutionTargetShellOptions {
@@ -631,6 +636,7 @@ export async function runAdapterExecutionTargetProcess(
     onSpawn: options.onSpawn,
     terminalResultCleanup: options.terminalResultCleanup,
     localProcessSandbox: target?.kind === "local" || !target ? options.localProcessSandbox : null,
+    minimalInheritedEnvironment: options.minimalInheritedEnvironment,
     remoteExecution: adapterExecutionTargetToRemoteSpec(target),
   });
 }

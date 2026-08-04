@@ -1984,8 +1984,9 @@ export function buildPaperclipEnv(agent: { id: string; companyId: string }): Rec
   );
   const runtimePort = process.env.PAPERCLIP_LISTEN_PORT ?? process.env.PORT ?? "3100";
   const apiUrl =
-    process.env.PAPERCLIP_RUNTIME_API_URL ??
-    process.env.PAPERCLIP_API_URL ??
+    process.env.PAPERCLIP_AGENT_API_URL?.trim() ||
+    process.env.PAPERCLIP_RUNTIME_API_URL?.trim() ||
+    process.env.PAPERCLIP_API_URL?.trim() ||
     `http://${runtimeHost}:${runtimePort}`;
   vars.PAPERCLIP_API_URL = apiUrl;
   return vars;
@@ -2232,6 +2233,36 @@ export function refreshPaperclipWorkspaceEnvForExecution(input: {
   return shapedWorkspaceEnv;
 }
 
+// A stricter ambient-environment policy for local workers that explicitly opt
+// into a fresh per-run home/config tree. The ordinary child policy preserves
+// user tool homes and authentication locations for first-party local CLIs;
+// that is not safe for an OpenCode worker sharing the Paperclip process
+// namespace. Keep only launch/runtime plumbing, locale/terminal behaviour,
+// scratch directories, and TLS trust-store paths. Explicit run/adapter env is
+// merged after this allowlist and remains authoritative.
+const MINIMAL_INHERITED_CHILD_ENV_KEYS = new Set([
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SystemRoot",
+  "WINDIR",
+  "COMSPEC",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LANGUAGE",
+  "TZ",
+  "TERM",
+  "COLORTERM",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "CI",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
 export function sanitizeInheritedPaperclipEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
   delete env.PAPERCLIPAI_CMD;
@@ -2241,6 +2272,23 @@ export function sanitizeInheritedPaperclipEnv(baseEnv: NodeJS.ProcessEnv): NodeJ
     if (key === "PAPERCLIP_LISTEN_HOST") continue;
     if (key === "PAPERCLIP_LISTEN_PORT") continue;
     delete env[key];
+  }
+  return env;
+}
+
+/**
+ * Keep only non-authoritative process plumbing for a local worker that has
+ * requested an isolated HOME/XDG runtime. This deliberately excludes HOME,
+ * XDG_*, CODEX_HOME, PAPERCLIP_* and all ambient provider/database/auth
+ * variables. Paperclip runtime identity and any explicit adapter env are
+ * supplied separately by the caller after this helper runs.
+ */
+export function sanitizeMinimalInheritedPaperclipEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (!(MINIMAL_INHERITED_CHILD_ENV_KEYS.has(key) || key.startsWith("LC_"))) continue;
+    if (typeof value !== "string") continue;
+    env[key] = value;
   }
   return env;
 }
@@ -3198,12 +3246,20 @@ export async function runChildProcess(
     stdin?: string;
     remoteExecution?: RemoteExecutionSpec | null;
     localProcessSandbox?: LocalProcessSandboxOptions | null;
+    /**
+     * Use the strict ambient-environment allowlist. Explicit `env` values are
+     * still forwarded. This is intentionally opt-in for adapters that arrange
+     * a fresh per-run HOME/XDG configuration.
+     */
+    minimalInheritedEnvironment?: boolean;
   },
 ): Promise<RunProcessResult> {
   const onLogError = opts.onLogError ?? ((err, id, msg) => console.warn({ err, runId: id }, msg));
   return new Promise<RunProcessResult>((resolve, reject) => {
     const rawMerged: NodeJS.ProcessEnv = {
-      ...sanitizeInheritedPaperclipEnv(process.env),
+      ...(opts.minimalInheritedEnvironment
+        ? sanitizeMinimalInheritedPaperclipEnv(process.env)
+        : sanitizeInheritedPaperclipEnv(process.env)),
       ...opts.env,
     };
 

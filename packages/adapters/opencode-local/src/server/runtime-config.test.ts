@@ -34,6 +34,52 @@ async function makeConfigHome(initialConfig?: Record<string, unknown>) {
 }
 
 describe("prepareOpenCodeRuntimeConfig", () => {
+  it("does not import ambient server config or provider settings for minimal workers", async () => {
+    const ambientHome = await makeConfigHome({
+      provider: {
+        ambient: {
+          options: { apiKey: "ambient-secret" },
+          models: { "ambient/model": {} },
+        },
+      },
+    });
+    const previousConfig = process.env.XDG_CONFIG_HOME;
+    const previousProviders = process.env.PAPERCLIP_OPENCODE_PROVIDERS;
+    process.env.XDG_CONFIG_HOME = ambientHome;
+    process.env.PAPERCLIP_OPENCODE_PROVIDERS = JSON.stringify({
+      ambient: { options: { apiKey: "ambient-provider-secret" }, models: { "ambient/model": {} } },
+    });
+
+    try {
+      const prepared = await prepareOpenCodeRuntimeConfig({
+        env: {},
+        config: { model: "deepseek-local/deepseek-v4-flash", dangerouslySkipPermissions: false },
+        minimalEnvironment: true,
+      });
+      cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+      const runtimeConfig = JSON.parse(
+        await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+      ) as Record<string, unknown>;
+
+      expect(runtimeConfig.provider).toEqual({
+        "deepseek-local": { models: { "deepseek-v4-flash": {} } },
+      });
+      expect(runtimeConfig.permission).toBeUndefined();
+      expect(prepared.env.XDG_CONFIG_HOME).not.toBe(ambientHome);
+      expect(prepared.env.HOME).not.toBe(process.env.HOME);
+      expect(prepared.notes).toContain(
+        "Prepared a fresh run-scoped HOME/XDG tree; ambient tool homes and config locations are not inherited.",
+      );
+      await prepared.cleanup();
+      cleanupPaths.delete(prepared.env.XDG_CONFIG_HOME);
+    } finally {
+      if (previousConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousConfig;
+      if (previousProviders === undefined) delete process.env.PAPERCLIP_OPENCODE_PROVIDERS;
+      else process.env.PAPERCLIP_OPENCODE_PROVIDERS = previousProviders;
+    }
+  });
+
   it("injects an external_directory allow rule by default", async () => {
     const configHome = await makeConfigHome({
       permission: {
