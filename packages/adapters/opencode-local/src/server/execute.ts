@@ -54,6 +54,11 @@ import {
 } from "./models.js";
 import { removeMaintainerOnlySkillSymlinks } from "@paperclipai/adapter-utils/server-utils";
 import { prepareOpenCodeRuntimeConfig } from "./runtime-config.js";
+import {
+  fitOpenCodePrompt,
+  readOpenCodeModelLimitsFromConfig,
+  resolveOpenCodePromptBudget,
+} from "./context-budget.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +85,51 @@ function resolveOpenCodeBiller(env: Record<string, string>, provider: string | n
 
 const REMOTE_OPENCODE_MODELS_PROBE_DEFAULT_TIMEOUT_SEC = 20;
 const REMOTE_OPENCODE_MODELS_PROBE_SANDBOX_TIMEOUT_SEC = 120;
+
+async function readJsonRecord(filepath: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.readFile(filepath, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function resolveOpenCodeModelLimits(input: {
+  config: Record<string, unknown>;
+  model: string;
+  env: Record<string, string>;
+  xdgConfigHome?: string;
+}) {
+  const configured = readOpenCodeModelLimitsFromConfig(input.config, input.model);
+  const configHome = input.xdgConfigHome?.trim();
+  const runtimeConfig = configHome
+    ? await readJsonRecord(path.join(configHome, "opencode", "opencode.json"))
+    : {};
+  const fromRuntime = readOpenCodeModelLimitsFromConfig(runtimeConfig, input.model);
+
+  // Run-scoped overrides are useful for model gateways whose catalog metadata
+  // is intentionally omitted from the checked-in runtime config.
+  const contextWindow = Number.parseInt(
+    input.env.PAPERCLIP_OPENCODE_CONTEXT_WINDOW ?? process.env.PAPERCLIP_OPENCODE_CONTEXT_WINDOW ?? "",
+    10,
+  );
+  const maxOutputTokens = Number.parseInt(
+    input.env.PAPERCLIP_OPENCODE_MAX_OUTPUT_TOKENS ?? process.env.PAPERCLIP_OPENCODE_MAX_OUTPUT_TOKENS ?? "",
+    10,
+  );
+  if (Number.isFinite(contextWindow) && contextWindow > 0 && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) {
+    return {
+      contextWindow,
+      maxOutputTokens,
+      source: "environment",
+    };
+  }
+  return fromRuntime ?? configured;
+}
 
 export async function ensureRemoteOpenCodeModelConfiguredAndAvailable(input: {
   runId: string;
@@ -548,14 +598,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? ""
       : renderTemplate(promptTemplate, templateData);
     const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-    const prompt = joinPromptSections([
+    let prompt = joinPromptSections([
       instructionsPrefix,
       renderedBootstrapPrompt,
       wakePrompt,
       sessionHandoffNote,
       renderedPrompt,
     ]);
-    const promptMetrics = {
+    let promptMetrics: Record<string, number> = {
       promptChars: prompt.length,
       instructionsChars: instructionsPrefix.length,
       bootstrapPromptChars: renderedBootstrapPrompt.length,
@@ -563,6 +613,46 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       sessionHandoffChars: sessionHandoffNote.length,
       heartbeatPromptChars: renderedPrompt.length,
     };
+
+    const modelLimits = await resolveOpenCodeModelLimits({
+      config,
+      model,
+      env: preparedRuntimeConfig.env,
+      xdgConfigHome: preparedRuntimeConfig.env.XDG_CONFIG_HOME,
+    });
+    if (modelLimits) {
+      const promptBudget = resolveOpenCodePromptBudget({
+        contextWindow: modelLimits.contextWindow,
+        requestedOutputTokens: modelLimits.maxOutputTokens,
+      });
+      const fittedPrompt = fitOpenCodePrompt({
+        sections: [
+          { name: "instructions", text: instructionsPrefix, priority: 0 },
+          { name: "bootstrap", text: renderedBootstrapPrompt, priority: 3 },
+          { name: "wake", text: wakePrompt, priority: 1 },
+          { name: "sessionHandoff", text: sessionHandoffNote, priority: 2 },
+          { name: "heartbeat", text: renderedPrompt, priority: 4 },
+        ],
+        budget: promptBudget,
+      });
+      prompt = fittedPrompt.prompt;
+      promptMetrics = {
+        ...promptMetrics,
+        promptChars: prompt.length,
+        ...fittedPrompt.metrics,
+      };
+      if (fittedPrompt.trimmed) {
+        const compacted = fittedPrompt.omittedSections.length > 0
+          ? `; omitted sections: ${fittedPrompt.omittedSections.join(", ")}`
+          : "";
+        commandNotes.push(
+          `Compacted OpenCode prompt to ${fittedPrompt.metrics.promptTokenEstimate} estimated input tokens ` +
+            `(budget ${fittedPrompt.metrics.promptTokenBudget}; context ${modelLimits.contextWindow}; ` +
+            `output ${modelLimits.maxOutputTokens}; safety margin ${promptBudget.safetyMarginTokens}; ` +
+            `source ${modelLimits.source ?? "unknown"}${compacted}).`,
+        );
+      }
+    }
 
     // Optional diagnostic: surface OpenCode's own logs on stderr (captured into the
     // run result) so failures that OpenCode otherwise wraps as an opaque

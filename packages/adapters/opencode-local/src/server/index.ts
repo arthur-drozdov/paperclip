@@ -71,3 +71,11 @@ export {
   resetOpenCodeModelsCacheForTests,
 } from "./models.js";
 export { parseOpenCodeJsonl, isOpenCodeUnknownSessionError } from "./parse.js";
+export {
+  DEFAULT_OPENCODE_ESTIMATED_CHARS_PER_TOKEN,
+  DEFAULT_OPENCODE_PROMPT_SAFETY_MARGIN_TOKENS,
+  estimateOpenCodePromptTokens,
+  fitOpenCodePrompt,
+  readOpenCodeModelLimitsFromConfig,
+  resolveOpenCodePromptBudget,
+} from "./context-budget.js";
