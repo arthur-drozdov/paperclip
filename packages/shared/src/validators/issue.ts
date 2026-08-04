@@ -542,6 +542,7 @@ export const updateIssueSchema = createIssueBaseSchema.omit({
   requestDepth: issueRequestDepthInputSchema.optional(),
   assigneeAgentId: z.string().trim().min(1).optional().nullable(),
   comment: multilineTextSchema.pipe(z.string().min(1)).optional(),
+  onBehalfOfUserId: z.string().trim().min(1).optional().nullable(),
   reviewRequest: issueReviewRequestSchema.optional().nullable(),
   reopen: z.boolean().optional(),
   resume: z.boolean().optional(),
@@ -551,6 +552,21 @@ export const updateIssueSchema = createIssueBaseSchema.omit({
 
 export type UpdateIssue = z.infer<typeof updateIssueSchema>;
 export type IssueExecutionWorkspaceSettings = z.infer<typeof issueExecutionWorkspaceSettingsSchema>;
+
+export const stalledReviewDecisionSchema = z.object({
+  action: z.enum(["approve", "request_changes", "send_back"]),
+  note: multilineTextSchema.pipe(z.string().min(1)).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.action === "request_changes" && !value.note?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["note"],
+      message: "Request changes requires a note",
+    });
+  }
+});
+
+export type StalledReviewDecision = z.infer<typeof stalledReviewDecisionSchema>;
 
 export const checkoutIssueSchema = z.object({
   agentId: z.string().uuid(),
@@ -640,6 +656,7 @@ export const issueCommentMetadataSectionSchema = z.object({
 export const issueCommentMetadataSchema = z.object({
   version: z.literal(1),
   sourceRunId: z.string().uuid().nullable().optional(),
+  authorizationReason: z.string().trim().min(1).max(160).nullable().optional(),
   sections: z.array(issueCommentMetadataSectionSchema).min(1).max(20),
 }).strict();
 
@@ -647,6 +664,7 @@ export type IssueCommentMetadata = z.infer<typeof issueCommentMetadataSchema>;
 
 export const addIssueCommentSchema = z.object({
   body: multilineTextSchema.pipe(z.string().min(1)),
+  onBehalfOfUserId: z.string().trim().min(1).optional().nullable(),
   authorType: issueCommentAuthorTypeSchema.optional(),
   presentation: issueCommentPresentationSchema.nullable().optional(),
   metadata: issueCommentMetadataSchema.nullable().optional(),
