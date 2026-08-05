@@ -1182,6 +1182,7 @@ export async function startServer(): Promise<StartedServer> {
                 requestedByActorType: "system",
                 taskKey: `status-card:${cardId}`,
                 rethrowOnError: true,
+                getDependencyReadiness: () => issues.getDependencyReadiness(generatingIssue.id),
               });
             } catch (err) {
               await issues.update(generatingIssue.id, { status: "cancelled" });

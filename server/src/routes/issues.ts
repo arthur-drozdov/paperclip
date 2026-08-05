@@ -1800,6 +1800,35 @@ function isClosedIssueStatus(status: string | null | undefined): status is "done
   return status === "done" || status === "cancelled";
 }
 
+type CommentWakeDependencyReadiness = {
+  unresolvedBlockerCount?: number;
+};
+
+/**
+ * Ordinary board comments are a nudge for work that is ready to run, not a
+ * way to bypass the board's dependency and backlog semantics.  Explicit
+ * mentions, reopen/resume requests, decision continuations, and the separate
+ * blockers-resolved path are handled by their own wake paths and do not use
+ * this predicate.
+ */
+async function canWakeAssigneeForOrdinaryComment(input: {
+  issueId: string;
+  status: string;
+  getDependencyReadiness?: (issueId: string) => Promise<CommentWakeDependencyReadiness>;
+}) {
+  if (input.status === "backlog" || input.status === "blocked") return false;
+  if (!input.getDependencyReadiness) return false;
+  try {
+    const readiness = await input.getDependencyReadiness(input.issueId);
+    return readiness.unresolvedBlockerCount === 0;
+  } catch (err) {
+    logger.warn({ err, issueId: input.issueId }, "failed to check dependencies before issue comment wake");
+    // Fail closed: a comment must not turn an unreadable dependency state
+    // into an execution request.
+    return false;
+  }
+}
+
 function shouldImplicitlyMoveCommentedIssueToTodo(input: {
   issueStatus: string | null | undefined;
   assigneeAgentId: string | null | undefined;
@@ -7669,6 +7698,7 @@ export function issueRoutes(
       contextSource: "issue.create",
       requestedByActorType: actor.actorType,
       requestedByActorId: actor.actorId,
+      getDependencyReadiness: () => svc.getDependencyReadiness(issue.id),
     });
     await queueTaskWatchdogEvaluation(issue, actor.runId);
 
@@ -7841,6 +7871,7 @@ export function issueRoutes(
         contextSource: "issue.child_create",
         requestedByActorType: actor.actorType,
         requestedByActorId: actor.actorId,
+        getDependencyReadiness: () => svc.getDependencyReadiness(issue.id),
       });
     }
     await blockWatchdogParentOnCurrentChild({
@@ -8045,6 +8076,7 @@ export function issueRoutes(
           contextSource: "issue.accepted_plan_decomposition",
           requestedByActorType: actor.actorType,
           requestedByActorId: actor.actorId,
+          getDependencyReadiness: () => svc.getDependencyReadiness(issue.id),
         });
       }
       await queueTaskWatchdogEvaluation(issue, actor.runId);
@@ -9350,34 +9382,44 @@ export function issueRoutes(
 
       if (executionStageWakeup) {
         addWakeup(executionStageWakeup.agentId, executionStageWakeup.wakeup);
-      } else if (assigneeChanged && issue.assigneeAgentId && issue.status !== "backlog") {
-        addWakeup(issue.assigneeAgentId, {
-          source: "assignment",
-          triggerDetail: "system",
-          reason: "issue_assigned",
-          payload: {
-            issueId: issue.id,
-            ...(comment ? { commentId: comment.id } : {}),
-            mutation: "update",
-            ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
-            ...(interruptedRunId ? { interruptedRunId } : {}),
-          },
-          requestedByActorType: actor.actorType,
-          requestedByActorId: actor.actorId,
-          contextSnapshot: {
-            issueId: issue.id,
-            ...(comment
-              ? {
-                  taskId: issue.id,
-                  commentId: comment.id,
-                  wakeCommentId: comment.id,
-                }
-              : {}),
-            source: "issue.update",
-            ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
-            ...(interruptedRunId ? { interruptedRunId } : {}),
-          },
+      } else if (assigneeChanged && issue.assigneeAgentId) {
+        const assignmentWakeAllowed = await canWakeAssigneeForOrdinaryComment({
+          issueId: issue.id,
+          status: issue.status,
+          getDependencyReadiness: dependencyReadinessSvc.getDependencyReadiness,
         });
+        if (!assignmentWakeAllowed) {
+          // Assignment is still recorded, but a blocked or dependency-waiting
+          // issue must wait for an explicit resume or blockers-resolved wake.
+        } else {
+          addWakeup(issue.assigneeAgentId, {
+            source: "assignment",
+            triggerDetail: "system",
+            reason: "issue_assigned",
+            payload: {
+              issueId: issue.id,
+              ...(comment ? { commentId: comment.id } : {}),
+              mutation: "update",
+              ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
+              ...(interruptedRunId ? { interruptedRunId } : {}),
+            },
+            requestedByActorType: actor.actorType,
+            requestedByActorId: actor.actorId,
+            contextSnapshot: {
+              issueId: issue.id,
+              ...(comment
+                ? {
+                    taskId: issue.id,
+                    commentId: comment.id,
+                    wakeCommentId: comment.id,
+                  }
+                : {}),
+              source: "issue.update",
+              ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
+              ...(interruptedRunId ? { interruptedRunId } : {}),
+            },
+          });
+        }
       }
 
       if (
@@ -9416,8 +9458,19 @@ export function issueRoutes(
         const actorIsAgent = actor.actorType === "agent";
         const selfComment = actorIsAgent && actor.actorId === assigneeId;
         const skipAssigneeCommentWake = selfComment || isClosed;
+        const ordinaryCommentWakeAllowed = assigneeId && !assigneeChanged && !skipAssigneeCommentWake
+          ? await canWakeAssigneeForOrdinaryComment({
+              issueId: issue.id,
+              status: issue.status,
+              getDependencyReadiness: dependencyReadinessSvc.getDependencyReadiness,
+            })
+          : false;
 
-        if (assigneeId && !assigneeChanged && (reopened || !skipAssigneeCommentWake)) {
+        if (
+          assigneeId &&
+          !assigneeChanged &&
+          (reopened || ordinaryCommentWakeAllowed)
+        ) {
           addWakeup(assigneeId, {
             source: "automation",
             triggerDetail: "system",
@@ -10151,6 +10204,7 @@ export function issueRoutes(
           contextSource: "issue.interaction.accept",
           requestedByActorType: actor.actorType,
           requestedByActorId: actor.actorId,
+          getDependencyReadiness: () => svc.getDependencyReadiness(createdIssue.id),
         });
       }
 
@@ -11214,7 +11268,14 @@ export function issueRoutes(
       // transition (in_review -> done) suppresses a stale `issue_commented` wake
       // to the returnAssignee for an already-completed issue.
       const skipWake = selfComment || isClosedIssueStatus(currentIssue.status);
-      if (assigneeId && (reopened || !skipWake)) {
+      const ordinaryCommentWakeAllowed = assigneeId && !skipWake
+        ? await canWakeAssigneeForOrdinaryComment({
+            issueId: currentIssue.id,
+            status: currentIssue.status,
+            getDependencyReadiness: svc.getDependencyReadiness,
+          })
+        : false;
+      if (assigneeId && (reopened || ordinaryCommentWakeAllowed)) {
         if (reopened) {
           addWakeup(assigneeId, {
             source: "automation",

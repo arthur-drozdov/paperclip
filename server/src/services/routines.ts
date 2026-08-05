@@ -1860,6 +1860,7 @@ export function routineService(
           contextSource: "routine.dispatch",
           requestedByActorType: input.source === "schedule" ? "system" : undefined,
           rethrowOnError: true,
+          getDependencyReadiness: () => issueSvc.getDependencyReadiness(createdIssue!.id, txDb),
         });
         const updated = await finalizeRun(createdRun.id, {
           status: "issue_created",

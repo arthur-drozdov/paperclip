@@ -11,6 +11,7 @@ const mockIssueService = vi.hoisted(() => ({
   update: vi.fn(),
   addComment: vi.fn(),
   findMentionedAgents: vi.fn(),
+  getDependencyReadiness: vi.fn(),
   getRelationSummaries: vi.fn(),
   listWakeableBlockedDependents: vi.fn(),
   getWakeableParentAfterChildCompletion: vi.fn(),
@@ -227,6 +228,13 @@ describe("issue update comment wakeups", () => {
     registerModuleMocks();
     vi.clearAllMocks();
     mockIssueService.findMentionedAgents.mockResolvedValue([]);
+    mockIssueService.getDependencyReadiness.mockResolvedValue({
+      blockerIssueIds: [],
+      unresolvedBlockerIssueIds: [],
+      unresolvedBlockerCount: 0,
+      allBlockersDone: true,
+      isDependencyReady: true,
+    });
     mockIssueService.getRelationSummaries.mockResolvedValue({ blockedBy: [], blocks: [] });
     mockIssueService.listWakeableBlockedDependents.mockResolvedValue([]);
     mockIssueService.getWakeableParentAfterChildCompletion.mockResolvedValue(null);
@@ -278,6 +286,45 @@ describe("issue update comment wakeups", () => {
         }),
       }),
     );
+  });
+
+  it("records a blocked assignment without waking the new assignee", async () => {
+    const existing = makeIssue({ status: "blocked" });
+    const updated = makeIssue({
+      status: "blocked",
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+
+    const res = await request(await createApp())
+      .patch(`/api/issues/${existing.id}`)
+      .send({ assigneeAgentId: ASSIGNEE_AGENT_ID, assigneeUserId: null });
+
+    expect(res.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("records an assignment with unresolved dependencies without waking the assignee", async () => {
+    const existing = makeIssue({ status: "backlog" });
+    const updated = makeIssue({
+      status: "todo",
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.getDependencyReadiness.mockResolvedValue({ unresolvedBlockerCount: 1 });
+
+    const res = await request(await createApp())
+      .patch(`/api/issues/${existing.id}`)
+      .send({ assigneeAgentId: ASSIGNEE_AGENT_ID, assigneeUserId: null, status: "todo" });
+
+    expect(res.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
   });
 
   it("interrupts the active run and wakes the newly assigned agent with handoff context", async () => {
@@ -517,6 +564,82 @@ describe("issue update comment wakeups", () => {
           wakeReason: "issue_commented",
           source: "issue.comment",
         }),
+      }),
+    );
+  });
+
+  it("does not wake the assignee for an ordinary comment on backlog work", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "backlog",
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-backlog",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "a planning note only",
+    });
+
+    const res = await request(await createApp())
+      .post(`/api/issues/${existing.id}/comments`)
+      .send({ body: "a planning note only" });
+
+    expect(res.status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("does not wake the assignee for ready-looking work with unresolved dependencies", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "todo",
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.getDependencyReadiness.mockResolvedValue({ unresolvedBlockerCount: 1 });
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-dependency-wait",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "status note while waiting on the prerequisite",
+    });
+
+    const res = await request(await createApp())
+      .post(`/api/issues/${existing.id}/comments`)
+      .send({ body: "status note while waiting on the prerequisite" });
+
+    expect(res.status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("wakes the assignee for an ordinary comment on ready todo work", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "todo",
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-ready-todo",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "please pick this up",
+    });
+
+    const res = await request(await createApp())
+      .post(`/api/issues/${existing.id}/comments`)
+      .send({ body: "please pick this up" });
+
+    expect(res.status).toBe(201);
+    await vi.waitFor(() => expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1));
+    expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
+      ASSIGNEE_AGENT_ID,
+      expect.objectContaining({
+        reason: "issue_commented",
+        payload: expect.objectContaining({ issueId: existing.id, commentId: "comment-ready-todo" }),
       }),
     );
   });

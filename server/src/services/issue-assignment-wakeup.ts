@@ -18,7 +18,11 @@ export interface IssueAssignmentWakeupDeps {
   ) => Promise<unknown>;
 }
 
-export function queueIssueAssignmentWakeup(input: {
+type AssignmentDependencyReadiness = {
+  unresolvedBlockerCount?: number;
+};
+
+export async function queueIssueAssignmentWakeup(input: {
   heartbeat: IssueAssignmentWakeupDeps;
   issue: { id: string; assigneeAgentId: string | null; status: string };
   reason: string;
@@ -28,8 +32,19 @@ export function queueIssueAssignmentWakeup(input: {
   requestedByActorId?: string | null;
   taskKey?: string | null;
   rethrowOnError?: boolean;
+  /** Readiness is required so assignment paths cannot silently bypass hard blockers. */
+  getDependencyReadiness: () => Promise<AssignmentDependencyReadiness>;
 }) {
   if (!input.issue.assigneeAgentId || input.issue.status === "backlog") return;
+  if (input.issue.status === "blocked") return;
+
+  try {
+    const readiness = await input.getDependencyReadiness();
+    if ((readiness.unresolvedBlockerCount ?? 0) > 0) return;
+  } catch (err) {
+    logger.warn({ err, issueId: input.issue.id }, "failed to check dependencies before issue assignment wake");
+    return;
+  }
 
   return input.heartbeat
     .wakeup(input.issue.assigneeAgentId, {

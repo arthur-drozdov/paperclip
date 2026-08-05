@@ -3,7 +3,7 @@ import type { Db } from "@paperclipai/db";
 import { generateSummarySlotSchema, writeSummarySlotSchema } from "@paperclipai/shared";
 import { validate } from "../middleware/validate.js";
 import { forbidden, notFound } from "../errors.js";
-import { accessService, heartbeatService, instanceSettingsService, logActivity } from "../services/index.js";
+import { accessService, heartbeatService, instanceSettingsService, issueService, logActivity } from "../services/index.js";
 import { queueIssueAssignmentWakeup } from "../services/issue-assignment-wakeup.js";
 import { summarySlotService } from "../services/summary-slots.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -27,6 +27,7 @@ export function summarySlotRoutes(db: Db) {
   const router = Router();
   const access = accessService(db);
   const settings = instanceSettingsService(db);
+  const issues = issueService(db);
   const svc = summarySlotService(db);
   const heartbeat = heartbeatService(db);
 
@@ -145,6 +146,7 @@ export function summarySlotRoutes(db: Db) {
           contextSource: "summary-slot.generate",
           requestedByActorType: actor.actorType === "agent" ? "agent" : "user",
           requestedByActorId: actor.actorId,
+          getDependencyReadiness: () => issues.getDependencyReadiness(result.generatingIssue.id),
           taskKey: summarySlotSessionTaskKey({
             companyId,
             scopeKind: result.slot.scopeKind,
