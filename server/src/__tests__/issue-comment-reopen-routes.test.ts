@@ -1634,6 +1634,29 @@ describe.sequential("issue comment reopen routes", () => {
     ));
   });
 
+  it("records a blocked human PATCH comment without resuming or waking when dependency readiness cannot be read", async () => {
+    const issue = makeIssue("blocked");
+    mockIssueService.getById.mockResolvedValue(issue);
+    mockIssueService.getDependencyReadiness.mockRejectedValue(new Error("dependency store unavailable"));
+    mockIssueService.update.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...issue,
+      ...patch,
+    }));
+
+    const res = await request(await installActor(createApp()))
+      .patch(`/api/issues/${issue.id}`)
+      .send({ comment: "please explain the blocker" });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueService.update).not.toHaveBeenCalledWith(
+      issue.id,
+      expect.objectContaining({ status: "todo" }),
+    );
+    expect(mockIssueService.getDependencyReadiness).toHaveBeenCalledWith(issue.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
   it("does not wake blocked work for a local-CLI PATCH comment authenticated as a user", async () => {
     const issue = { ...makeIssue("blocked"), checkoutRunId: "run-local-cli" };
     mockIssueService.getById.mockResolvedValue(issue);

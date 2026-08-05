@@ -1850,6 +1850,25 @@ async function canWakeAssigneeForOrdinaryComment(input: {
   }
 }
 
+/**
+ * A dependency lookup failure must never turn a blocked issue into runnable
+ * work or prevent the accompanying human comment from being recorded. Treat
+ * an unreadable dependency graph as still blocked and let the ordinary-comment
+ * wake predicate independently fail closed.
+ */
+async function hasUnresolvedBlockersForCommentResume(input: {
+  issueId: string;
+  getDependencyReadiness: (issueId: string) => Promise<CommentWakeDependencyReadiness>;
+}) {
+  try {
+    const readiness = await input.getDependencyReadiness(input.issueId);
+    return readiness.unresolvedBlockerCount !== 0;
+  } catch (err) {
+    logger.warn({ err, issueId: input.issueId }, "failed to check dependencies before comment resume");
+    return true;
+  }
+}
+
 function shouldImplicitlyMoveCommentedIssueToTodo(input: {
   issueStatus: string | null | undefined;
   assigneeAgentId: string | null | undefined;
@@ -8525,7 +8544,10 @@ export function issueRoutes(
       : null;
     const hasUnresolvedFirstClassBlockers =
       isBlocked && effectiveMoveToTodoRequested
-        ? (await svc.getDependencyReadiness(existing.id)).unresolvedBlockerCount > 0
+        ? await hasUnresolvedBlockersForCommentResume({
+            issueId: existing.id,
+            getDependencyReadiness: (issueId) => svc.getDependencyReadiness(issueId),
+          })
         : false;
     if (resumeRequested === true && isBlocked && hasUnresolvedFirstClassBlockers) {
       res.status(409).json({ error: "Issue follow-up blocked by unresolved blockers" });
@@ -10964,7 +10986,10 @@ export function issueRoutes(
         shouldResumeInProgressScheduledRetry);
     const hasUnresolvedFirstClassBlockers =
       isBlocked && effectiveMoveToTodoRequested
-        ? (await svc.getDependencyReadiness(issue.id)).unresolvedBlockerCount > 0
+        ? await hasUnresolvedBlockersForCommentResume({
+            issueId: issue.id,
+            getDependencyReadiness: (issueId) => svc.getDependencyReadiness(issueId),
+          })
         : false;
     if (resumeRequested === true && isBlocked && hasUnresolvedFirstClassBlockers) {
       res.status(409).json({ error: "Issue follow-up blocked by unresolved blockers" });
