@@ -1138,6 +1138,40 @@ describeEmbeddedPostgres("secretService", () => {
     ]);
   });
 
+  it("resolves OpenClaw gateway authentication secret refs before dispatch", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const gatewayToken = await svc.create(companyId, {
+      name: `openclaw-token-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "gateway-token-value",
+    });
+    const gatewayPassword = await svc.create(companyId, {
+      name: `openclaw-password-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "gateway-password-value",
+    });
+
+    const resolved = await svc.resolveAdapterConfigForRuntime(
+      companyId,
+      {
+        url: "ws://openclaw.example.test:18789",
+        authToken: { type: "secret_ref", secretId: gatewayToken.id, version: "latest" },
+        password: { type: "secret_ref", secretId: gatewayPassword.id, version: "latest" },
+      },
+      undefined,
+      { adapterType: "openclaw_gateway" },
+    );
+
+    expect(resolved.config).toMatchObject({
+      url: "ws://openclaw.example.test:18789",
+      authToken: "gateway-token-value",
+      password: "gateway-password-value",
+    });
+    expect(resolved.secretKeys).toEqual(new Set(["authToken", "password"]));
+    expect(resolved.manifest.map((entry) => entry.secretId).sort()).toEqual([gatewayPassword.id, gatewayToken.id].sort());
+  });
+
   it("returns conflict when concurrent user secret value creation races the unique index", async () => {
     const companyId = await seedCompany();
     await seedCompanyMember(companyId, "user-1", "owner");
