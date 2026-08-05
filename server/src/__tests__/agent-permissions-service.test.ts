@@ -23,6 +23,12 @@ describe("agent permissions service", () => {
     expect(defaultPermissionsForRole("engineer").canCreateSkills).toBe(true);
   });
 
+  it("keeps decision management board-controlled by default", () => {
+    expect(defaultPermissionsForRole("ceo").canManageDecisions).toBe(false);
+    expect(defaultPermissionsForRole("engineer").canManageDecisions).toBe(false);
+    expect(normalizeAgentPermissions({ canManageDecisions: true }, "general").canManageDecisions).toBe(true);
+  });
+
   it("preserves explicit canCreateAgents overrides", () => {
     expect(normalizeAgentPermissions({ canCreateAgents: false }, "cto").canCreateAgents).toBe(false);
     expect(normalizeAgentPermissions({ canCreateAgents: true }, "engineer").canCreateAgents).toBe(true);
@@ -36,6 +42,7 @@ describe("agent permissions service", () => {
 
   it("validates skill creation permission with a default-on value", () => {
     expect(agentPermissionsSchema.parse({ canCreateAgents: false }).canCreateSkills).toBe(true);
+    expect(agentPermissionsSchema.parse({ canCreateAgents: false }).canManageDecisions).toBe(false);
     expect(agentPermissionsSchema.parse({ canCreateAgents: false, canCreateSkills: false }).canCreateSkills).toBe(false);
     expect(updateAgentPermissionsSchema.parse({
       canCreateAgents: false,
@@ -44,7 +51,8 @@ describe("agent permissions service", () => {
     expect(updateAgentPermissionsSchema.parse({
       canCreateAgents: false,
       canCreateSkills: false,
+      canManageDecisions: true,
       canAssignTasks: false,
-    }).canCreateSkills).toBe(false);
+    })).toMatchObject({ canCreateSkills: false, canManageDecisions: true });
   });
 });

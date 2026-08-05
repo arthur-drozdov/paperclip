@@ -1904,6 +1904,7 @@ function ConfigurationTab({
 
   const canCreateAgents = Boolean(agent.permissions?.canCreateAgents);
   const canCreateSkills = agent.permissions?.canCreateSkills !== false;
+  const canManageDecisions = Boolean(agent.permissions?.canManageDecisions);
   const canAssignTasks = Boolean(agent.access?.canAssignTasks);
   const taskAssignSource = agent.access?.taskAssignSource ?? "none";
   const taskAssignLocked = agent.role === "ceo" || canCreateAgents;
@@ -1955,6 +1956,7 @@ function ConfigurationTab({
           updatePermissions.mutate({
             canCreateAgents,
             canCreateSkills,
+            canManageDecisions,
             canAssignTasks,
             ...buildPermissionsForTrustPreset(nextPermissions, nextPermissions.trustPreset === "low_trust_review" ? "low_trust_review" : "standard"),
           })
@@ -1977,6 +1979,7 @@ function ConfigurationTab({
                 updatePermissions.mutate({
                   canCreateAgents: !canCreateAgents,
                   canCreateSkills,
+                  canManageDecisions,
                   canAssignTasks: !canCreateAgents ? true : canAssignTasks,
                 })
               }
@@ -1996,6 +1999,7 @@ function ConfigurationTab({
                 updatePermissions.mutate({
                   canCreateAgents,
                   canCreateSkills: !canCreateSkills,
+                  canManageDecisions,
                   canAssignTasks,
                 })
               }
@@ -2015,10 +2019,31 @@ function ConfigurationTab({
                 updatePermissions.mutate({
                   canCreateAgents,
                   canCreateSkills,
+                  canManageDecisions,
                   canAssignTasks: !canAssignTasks,
                 })
               }
               disabled={updatePermissions.isPending || taskAssignLocked}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <div className="space-y-1">
+              <div>Can manage company decisions</div>
+              <p className="text-xs text-muted-foreground">
+                Lets this agent review and resolve board decisions during an attributable run. Only the board can delegate this authority.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={canManageDecisions}
+              onCheckedChange={() =>
+                updatePermissions.mutate({
+                  canCreateAgents,
+                  canCreateSkills,
+                  canManageDecisions: !canManageDecisions,
+                  canAssignTasks,
+                })
+              }
+              disabled={updatePermissions.isPending}
             />
           </div>
         </div>

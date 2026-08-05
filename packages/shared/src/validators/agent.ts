@@ -13,6 +13,7 @@ import { agentDesiredSkillSelectionSchema } from "./adapter-skills.js";
 export const agentPermissionsSchema = z.object({
   canCreateAgents: z.boolean().optional().default(false),
   canCreateSkills: z.boolean().optional().default(true),
+  canManageDecisions: z.boolean().optional().default(false),
   trustPreset: trustPresetSchema.optional(),
   authorizationPolicy: trustAuthorizationPolicySchema.optional(),
 }).catchall(z.unknown());
@@ -225,6 +226,7 @@ export type TestAdapterEnvironment = z.infer<typeof testAdapterEnvironmentSchema
 export const updateAgentPermissionsSchema = z.object({
   canCreateAgents: z.boolean(),
   canCreateSkills: z.boolean().optional(),
+  canManageDecisions: z.boolean().optional(),
   canAssignTasks: z.boolean(),
   trustPreset: trustPresetSchema.optional(),
   authorizationPolicy: trustAuthorizationPolicySchema.optional(),

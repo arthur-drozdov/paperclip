@@ -1751,6 +1751,59 @@ describe.sequential("agent permission routes", () => {
     expect(res.body.permissions.canCreateSkills).toBe(false);
   });
 
+  it("allows the board to delegate decision management explicitly", async () => {
+    mockAgentService.updatePermissions.mockResolvedValue({
+      ...baseAgent,
+      permissions: { canCreateAgents: false, canCreateSkills: true, canManageDecisions: true },
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .patch(`/api/agents/${agentId}/permissions`)
+      .send({ canCreateAgents: false, canManageDecisions: true, canAssignTasks: true }));
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.updatePermissions).toHaveBeenCalledWith(agentId, {
+      canCreateAgents: false,
+      canManageDecisions: true,
+      canAssignTasks: true,
+    });
+    expect(res.body.permissions.canManageDecisions).toBe(true);
+  });
+
+  it("does not let a CEO agent grant decision authority", async () => {
+    const ceoAgent = {
+      ...baseAgent,
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      role: "ceo",
+      permissions: { canCreateAgents: true, canManageDecisions: false },
+    };
+    mockAgentService.getById.mockImplementation(async (id: string) => id === ceoAgent.id ? ceoAgent : baseAgent);
+
+    const app = await createApp({
+      type: "agent",
+      agentId: ceoAgent.id,
+      companyId,
+      runId: "run-1",
+      source: "agent_key",
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .patch(`/api/agents/${agentId}/permissions`)
+      .send({ canCreateAgents: false, canManageDecisions: true, canAssignTasks: true }));
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain("Only the board");
+    expect(mockAgentService.updatePermissions).not.toHaveBeenCalled();
+  });
+
   it("rejects CEO permission updates outside the caller company scope", async () => {
     const app = await createApp({
       type: "agent",

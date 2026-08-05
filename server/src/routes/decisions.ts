@@ -12,7 +12,8 @@ import {
 } from "@paperclipai/shared";
 import { validate } from "../middleware/validate.js";
 import { decisionService, type DecisionServiceOptions } from "../services/decisions.js";
-import { assertBoard, assertBoardOrAgent, assertCompanyAccess, getAccessibleResource, getActorInfo } from "./authz.js";
+import { assertBoardOrAgent, assertCompanyAccess, getAccessibleResource, getActorInfo } from "./authz.js";
+import { assertDecisionManager, decisionActor } from "./decision-management-authz.js";
 import { attentionService } from "../services/attention.js";
 import { authorizationDeniedDetails, authorizationService } from "../services/authorization.js";
 import { canReadDecisionSource } from "../services/decision-queues.js";
@@ -42,11 +43,6 @@ const statsQuerySchema = z.object({
 function agentContext(req: Parameters<typeof getActorInfo>[0]) {
   if (req.actor.type !== "agent" || !req.actor.agentId || !req.actor.runId) return null;
   return { agentId: req.actor.agentId, runId: req.actor.runId };
-}
-
-function boardUserId(req: Parameters<typeof getActorInfo>[0]) {
-  assertBoard(req);
-  return req.actor.userId ?? "local-implicit-board";
 }
 
 export function decisionRoutes(db: Db, options: DecisionServiceOptions) {
@@ -146,7 +142,8 @@ export function decisionRoutes(db: Db, options: DecisionServiceOptions) {
     res.status(201).json(await svc.createBundle({ companyId, actor: req.actor, ...agent, ...req.body }));
   });
   router.get("/companies/:companyId/decisions", async (req, res) => {
-    const companyId = req.params.companyId as string; assertBoard(req); assertCompanyAccess(req, companyId);
+    const companyId = req.params.companyId as string;
+    await assertDecisionManager(db, req, companyId);
     const query = z.object({ status: z.enum(["open", "decided", "expired", "cancelled"]).optional(), bundleId: z.string().uuid().optional(), targetIssueId: z.string().uuid().optional(), originAgentId: z.string().uuid().optional(), limit: z.coerce.number().int().positive().max(100).optional() }).safeParse(req.query);
     if (!query.success) { res.status(400).json({ error: "Invalid decision filters", details: query.error.flatten() }); return; }
     res.json(await svc.list(companyId, query.data));
@@ -175,20 +172,37 @@ export function decisionRoutes(db: Db, options: DecisionServiceOptions) {
     assertBoardOrAgent(req);
     const decision = await getAccessibleResource(req, res, svc.get(req.params.id as string), "Decision not found");
     if (!decision) return;
-    if (req.actor.type === "agent" && req.actor.agentId !== decision.originAgentId) { res.status(403).json({ error: "Only the origin agent may read this decision" }); return; }
+    if (req.actor.type === "agent" && req.actor.agentId !== decision.originAgentId) {
+      await assertDecisionManager(db, req, decision.companyId);
+    }
     res.json(await svc.outcome(decision.id));
   });
   router.post("/decisions/:id/decide", validate(decideSchema), async (req, res) => {
-    const userId = boardUserId(req);
     const decision = await getAccessibleResource(req, res, svc.get(req.params.id as string), "Decision not found");
     if (!decision) return;
-    res.json(await svc.decide({ id: decision.id, decidedByUserId: userId, userActor: req.actor, ...req.body }));
+    await assertDecisionManager(db, req, decision.companyId);
+    const actor = decisionActor(req);
+    res.json(await svc.decide({
+      id: decision.id,
+      decidedByUserId: actor.userId,
+      decidedByAgentId: actor.agentId,
+      decidedByRunId: actor.runId,
+      userActor: req.actor,
+      ...req.body,
+    }));
   });
   router.post("/decisions/:id/dismiss", validate(dismissSchema), async (req, res) => {
-    const userId = boardUserId(req);
     const decision = await getAccessibleResource(req, res, svc.get(req.params.id as string), "Decision not found");
     if (!decision) return;
-    res.json(await svc.dismiss(decision.id, userId, req.actor, req.body.reason));
+    await assertDecisionManager(db, req, decision.companyId);
+    const actor = decisionActor(req);
+    res.json(await svc.dismiss(
+      decision.id,
+      actor.userId,
+      req.actor,
+      req.body.reason,
+      { agentId: actor.agentId, runId: actor.runId },
+    ));
   });
   router.post("/decisions/:id/cancel", async (req, res) => {
     assertBoardOrAgent(req);

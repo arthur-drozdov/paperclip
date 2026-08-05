@@ -634,6 +634,7 @@ export function decisionService(db: Db, options: DecisionServiceOptions) {
   }
 
   async function decide(input: { id: string; optionId: string; inputValues?: Record<string, string>; idempotencyKey?: string | null; decidedByUserId: string;
+    decidedByAgentId?: string | null; decidedByRunId?: string | null;
     userActor: AuthorizationActor; dismissed?: boolean; dismissReason?: string | null }) {
     const current = await get(input.id); if (!current) throw notFound("Decision not found");
     const metadata = current.metadata as Record<string, unknown>;
@@ -665,6 +666,8 @@ export function decisionService(db: Db, options: DecisionServiceOptions) {
     const [claimed] = await db.update(decisions).set({ status: "decided", executionStatus: "running", chosenOptionId: input.optionId, inputValues: values,
       decidedByUserId: input.decidedByUserId, decidedAt: new Date(), updatedAt: new Date(), metadata: { ...metadata,
         decideIdempotencyKey: input.idempotencyKey ?? null,
+        ...(input.decidedByAgentId ? { decidedByAgentId: input.decidedByAgentId } : {}),
+        ...(input.decidedByRunId ? { decidedByRunId: input.decidedByRunId } : {}),
         ...(current.continuationPolicy === "wake_origin_agent" ? { continuationPending: true } : {}),
         ...(input.dismissed ? { dismissed: true, dismissReason: input.dismissReason ?? null } : {}) } })
       .where(and(eq(decisions.id, current.id), eq(decisions.status, "open"))).returning();
@@ -672,7 +675,9 @@ export function decisionService(db: Db, options: DecisionServiceOptions) {
     const run = await db.select({ responsibleUserId: heartbeatRuns.responsibleUserId }).from(heartbeatRuns).where(eq(heartbeatRuns.id, claimed.originRunId)).then((rows) => rows[0] ?? null);
     await logActivity(db, { companyId: claimed.companyId, actorType: "system", actorId: "decision-executor", agentId: claimed.originAgentId, runId: claimed.originRunId,
       responsibleUserIdOverride: input.decidedByUserId, action: input.dismissed ? "decision.dismissed" : "decision.decided", entityType: "decision", entityId: claimed.id,
-      details: { chosenOptionId: input.optionId, decidedByUserId: input.decidedByUserId, originResponsibleUserId: run?.responsibleUserId ?? null,
+      details: { chosenOptionId: input.optionId, decidedByUserId: input.decidedByUserId,
+        decidedByAgentId: input.decidedByAgentId ?? null, decidedByRunId: input.decidedByRunId ?? null,
+        originResponsibleUserId: run?.responsibleUserId ?? null,
         ...(input.dismissed ? { dismissed: true, dismissReason: input.dismissReason ?? null } : {}) } });
     return resumeDecision(claimed, input.userActor);
   }
@@ -692,18 +697,30 @@ export function decisionService(db: Db, options: DecisionServiceOptions) {
     return (await get(id))!;
   }
 
-  async function dismiss(id: string, userId: string, userActor: AuthorizationActor, reason?: string | null) {
+  async function dismiss(
+    id: string,
+    userId: string,
+    userActor: AuthorizationActor,
+    reason?: string | null,
+    decidingAgent?: { agentId: string | null; runId: string | null },
+  ) {
     const current = await get(id); if (!current) throw notFound("Decision not found");
     if (!verifyDecisionSpec(spec({ id: current.id, options: current.options, targetSnapshots: current.targetSnapshots as Record<string, Snapshot> }), current.signedSpec)) throw forbidden("Decision signature verification failed");
     const empty = current.options.find((option) => option.effects.length === 0);
-    if (empty) return decide({ id, optionId: empty.id, decidedByUserId: userId, userActor, dismissed: true, dismissReason: reason });
+    if (empty) return decide({ id, optionId: empty.id, decidedByUserId: userId,
+      decidedByAgentId: decidingAgent?.agentId ?? null, decidedByRunId: decidingAgent?.runId ?? null,
+      userActor, dismissed: true, dismissReason: reason });
     const [updated] = await db.update(decisions).set({ status: "decided", executionStatus: "succeeded", chosenOptionId: "dismissed", decidedByUserId: userId,
       decidedAt: new Date(), updatedAt: new Date(), metadata: { ...current.metadata, dismissed: true, dismissReason: reason ?? null,
+        ...(decidingAgent?.agentId ? { decidedByAgentId: decidingAgent.agentId } : {}),
+        ...(decidingAgent?.runId ? { decidedByRunId: decidingAgent.runId } : {}),
         ...(current.continuationPolicy === "wake_origin_agent" ? { continuationPending: true } : {}) } }).where(and(eq(decisions.id, id), eq(decisions.status, "open"))).returning();
     if (!updated) throw conflict("decision_already_resolved", { code: "decision_already_resolved" });
     await logActivity(db, { companyId: updated.companyId, actorType: "system", actorId: "decision-executor", agentId: updated.originAgentId,
       runId: updated.originRunId, responsibleUserIdOverride: userId, action: "decision.dismissed", entityType: "decision", entityId: updated.id,
-      details: { chosenOptionId: "dismissed", decidedByUserId: userId, dismissed: true } });
+      details: { chosenOptionId: "dismissed", decidedByUserId: userId,
+        decidedByAgentId: decidingAgent?.agentId ?? null, decidedByRunId: decidingAgent?.runId ?? null,
+        dismissed: true } });
     await deliverContinuation(updated, "decided");
     return outcome(id);
   }

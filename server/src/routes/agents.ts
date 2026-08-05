@@ -2792,6 +2792,13 @@ export function agentRoutes(
         res.status(403).json({ error: "Only CEO can manage permissions" });
         return;
       }
+      if (
+        req.body.canManageDecisions !== undefined &&
+        req.body.canManageDecisions !== Boolean(existing.permissions?.canManageDecisions)
+      ) {
+        res.status(403).json({ error: "Only the board can delegate decision authority" });
+        return;
+      }
     } else {
       await assertBoardCanManageAgentsForCompany(req, existing.companyId);
     }
@@ -2828,6 +2835,7 @@ export function agentRoutes(
       details: {
         canCreateAgents: agent.permissions?.canCreateAgents ?? false,
         canCreateSkills: agent.permissions?.canCreateSkills ?? true,
+        canManageDecisions: agent.permissions?.canManageDecisions ?? false,
         canAssignTasks: effectiveCanAssignTasks,
         trustPreset: agent.permissions?.trustPreset ?? "standard",
       },

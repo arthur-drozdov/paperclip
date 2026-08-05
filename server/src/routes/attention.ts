@@ -3,7 +3,7 @@ import type { Db } from "@paperclipai/db";
 import type { AttentionSortMode } from "@paperclipai/shared";
 import { attentionService } from "../services/attention.js";
 import { badRequest } from "../errors.js";
-import { assertBoard, assertCompanyAccess } from "./authz.js";
+import { assertDecisionManager, decisionFeedUserId } from "./decision-management-authz.js";
 
 function optionalQueryString(value: unknown, field: string) {
   if (value === undefined) return undefined;
@@ -17,10 +17,10 @@ export function attentionRoutes(db: Db) {
 
   router.get("/companies/:companyId/attention", async (req, res) => {
     const companyId = req.params.companyId as string;
-    assertCompanyAccess(req, companyId);
-    assertBoard(req);
-    if (!req.actor.userId) {
-      res.status(403).json({ error: "Board user context required" });
+    await assertDecisionManager(db, req, companyId);
+    const userId = decisionFeedUserId(req);
+    if (!userId) {
+      res.status(403).json({ error: "Responsible user context required" });
       return;
     }
 
@@ -39,7 +39,7 @@ export function attentionRoutes(db: Db) {
     const limit = limitValue === undefined ? undefined : Number(limitValue);
     if (limit !== undefined && !Number.isInteger(limit)) throw badRequest("limit must be an integer");
     const feed = await svc.list(companyId, {
-      userId: req.actor.userId,
+      userId,
       includeDismissed,
       archived,
       all,

@@ -18,7 +18,8 @@ import {
   logActivity,
   secretService,
 } from "../services/index.js";
-import { assertBoard, assertCompanyAccess, getAccessibleResource, getActorInfo, hasCompanyAccess } from "./authz.js";
+import { assertCompanyAccess, getAccessibleResource, getActorInfo, hasCompanyAccess } from "./authz.js";
+import { assertDecisionManager, decisionActor } from "./decision-management-authz.js";
 import { redactEventPayload } from "../redaction.js";
 import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 import { issueService } from "../services/issues.js";
@@ -286,13 +287,15 @@ export function approvalRoutes(
   });
 
   router.post("/approvals/:id/approve", validate(resolveApprovalSchema), async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
-    if (!(await requireApprovalAccess(req, id))) {
+    const accessible = await requireApprovalAccess(req, id);
+    if (!accessible) {
       res.status(404).json({ error: "Approval not found" });
       return;
     }
-    const decidedByUserId = req.actor.userId ?? "board";
+    await assertDecisionManager(db, req, accessible.companyId);
+    const decidingActor = decisionActor(req);
+    const decidedByUserId = decidingActor.userId;
     const { approval, applied } = await svc.approve(id, decidedByUserId, req.body.decisionNote);
 
     if (applied) {
@@ -306,14 +309,21 @@ export function approvalRoutes(
 
       await logActivity(db, {
         companyId: approval.companyId,
-        actorType: "user",
-        actorId: req.actor.userId ?? "board",
+        actorType: decidingActor.actor.actorType,
+        actorId: decidingActor.actor.actorId,
+        agentId: decidingActor.agentId,
+        runId: decidingActor.runId,
+        agentApiKeyId: decidingActor.agentApiKeyId,
+        responsibleUserIdOverride: decidedByUserId,
         action: "approval.approved",
         entityType: "approval",
         entityId: approval.id,
         details: {
           type: approval.type,
           requestedByAgentId: approval.requestedByAgentId,
+          decidedByUserId,
+          decidedByAgentId: decidingActor.agentId,
+          decidedByRunId: decidingActor.runId,
           linkedIssueIds,
         },
       });
@@ -402,13 +412,15 @@ export function approvalRoutes(
   });
 
   router.post("/approvals/:id/reject", validate(resolveApprovalSchema), async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
-    if (!(await requireApprovalAccess(req, id))) {
+    const accessible = await requireApprovalAccess(req, id);
+    if (!accessible) {
       res.status(404).json({ error: "Approval not found" });
       return;
     }
-    const decidedByUserId = req.actor.userId ?? "board";
+    await assertDecisionManager(db, req, accessible.companyId);
+    const decidingActor = decisionActor(req);
+    const decidedByUserId = decidingActor.userId;
     const { approval, applied } = await svc.reject(id, decidedByUserId, req.body.decisionNote);
 
     if (applied) {
@@ -416,12 +428,17 @@ export function approvalRoutes(
       const lostReviewIssueIds = await lostReviewPathIssueIds(approval.companyId, linkedIssues);
       await logActivity(db, {
         companyId: approval.companyId,
-        actorType: "user",
-        actorId: req.actor.userId ?? "board",
+        actorType: decidingActor.actor.actorType,
+        actorId: decidingActor.actor.actorId,
+        agentId: decidingActor.agentId,
+        runId: decidingActor.runId,
+        agentApiKeyId: decidingActor.agentApiKeyId,
+        responsibleUserIdOverride: decidedByUserId,
         action: "approval.rejected",
         entityType: "approval",
         entityId: approval.id,
-        details: { type: approval.type },
+        details: { type: approval.type, decidedByUserId,
+          decidedByAgentId: decidingActor.agentId, decidedByRunId: decidingActor.runId },
       });
       await queueAdditionalApprovalReviewPathWakes({
         approvalId: approval.id,
@@ -440,23 +457,30 @@ export function approvalRoutes(
     "/approvals/:id/request-revision",
     validate(requestApprovalRevisionSchema),
     async (req, res) => {
-      assertBoard(req);
       const id = req.params.id as string;
-      if (!(await requireApprovalAccess(req, id))) {
+      const accessible = await requireApprovalAccess(req, id);
+      if (!accessible) {
         res.status(404).json({ error: "Approval not found" });
         return;
       }
-      const decidedByUserId = req.actor.userId ?? "board";
+      await assertDecisionManager(db, req, accessible.companyId);
+      const decidingActor = decisionActor(req);
+      const decidedByUserId = decidingActor.userId;
       const approval = await svc.requestRevision(id, decidedByUserId, req.body.decisionNote);
 
       await logActivity(db, {
         companyId: approval.companyId,
-        actorType: "user",
-        actorId: req.actor.userId ?? "board",
+        actorType: decidingActor.actor.actorType,
+        actorId: decidingActor.actor.actorId,
+        agentId: decidingActor.agentId,
+        runId: decidingActor.runId,
+        agentApiKeyId: decidingActor.agentApiKeyId,
+        responsibleUserIdOverride: decidedByUserId,
         action: "approval.revision_requested",
         entityType: "approval",
         entityId: approval.id,
-        details: { type: approval.type },
+        details: { type: approval.type, decidedByUserId,
+          decidedByAgentId: decidingActor.agentId, decidedByRunId: decidingActor.runId },
       });
 
       res.json(redactApprovalPayload(approval));

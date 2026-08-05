@@ -121,6 +121,37 @@ describePg("decisionService", () => {
     expect(wakes).toHaveLength(1);
   });
 
+  it("records the delegated agent and run without replacing the accountable user", async () => {
+    const created = await service().create({
+      companyId,
+      actor: agentActor(),
+      agentId,
+      runId,
+      title: "Proceed?",
+      body: "No-effect delegation fixture",
+      options: [{ id: "yes", label: "Yes", effects: [] }],
+    });
+    const delegatedActor = {
+      ...agentActor(),
+      onBehalfOfUserId: decidedByUserId,
+      onBehalfOfMemberships: [{ companyId, membershipRole: "member", status: "active" }],
+    };
+    const result = await service().decide({
+      id: created.id,
+      optionId: "yes",
+      decidedByUserId,
+      decidedByAgentId: agentId,
+      decidedByRunId: runId,
+      userActor: delegatedActor,
+    });
+
+    expect(result.decidedByUserId).toBe(decidedByUserId);
+    expect(result.metadata).toMatchObject({ decidedByAgentId: agentId, decidedByRunId: runId });
+    const [audit] = await db.select().from(activityLog).where(eq(activityLog.action, "decision.decided"));
+    expect(audit?.responsibleUserId).toBe(decidedByUserId);
+    expect(audit?.details).toMatchObject({ decidedByUserId, decidedByAgentId: agentId, decidedByRunId: runId });
+  });
+
   it("allows one double-decide winner and rejects the loser", async () => {
     const created = await createCommentDecision();
     const outcomes = await Promise.allSettled([
