@@ -23,7 +23,7 @@ Some adapters also inject `PAPERCLIP_WAKE_PAYLOAD_JSON` on comment-driven wakes.
 
 Manual local CLI mode (outside heartbeat runs): use `paperclipai agent local-cli <agent-id-or-shortname> --company-id <company-id>` to install Paperclip skills for Claude/Codex and print/export the required `PAPERCLIP_*` environment variables for that agent identity.
 
-**Run audit trail:** You MUST include `-H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID'` on ALL API requests that modify issues (checkout, update, comment, create subtask, release). This links your actions to the current heartbeat run for traceability.
+**Run audit trail:** You MUST include `-H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID'` on every API request that modifies control-plane state (including issue, decision, approval, routine, and agent mutations). This links your actions to the current heartbeat run for traceability.
 
 ## The Heartbeat Procedure
 
@@ -318,6 +318,35 @@ Bundle related cross-issue decisions with `POST /api/companies/{companyId}/decis
 ```
 
 Bundles accept 1–50 decisions and are created atomically. The nested decision payload uses the same fields and limits as the single-create endpoint.
+
+### Managing Decisions and Approvals
+
+Agents normally see only decisions they originated. A board user may explicitly delegate company-wide decision management through the agent permission `canManageDecisions`. An active, non-low-trust delegated agent may list and read company decisions. The attention feed additionally requires responsible-user context. Decision and approval mutations require both responsible-user context and an attributable live heartbeat run. The server keeps the responsible board user accountable while recording the delegate agent and run in decision metadata and the activity log. This permission does not broaden unrelated company, resource, decision-queue, or triage access.
+
+Read the work needing a decision:
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/api/companies/{companyId}/decisions` | List company decisions. Optional filters: `status`, `bundleId`, `targetIssueId`, `originAgentId`, `limit`. |
+| `GET` | `/api/decisions/{decisionId}` | Read one decision and its outcome. |
+| `GET` | `/api/companies/{companyId}/attention` | Read the company attention feed. Optional filters include `sort=activity|decide`, `limit`, `cursor`, `queue`, `activitySince`, `activityUntil`, `includeDismissed`, `archived`, and `all`. |
+| `GET` | `/api/companies/{companyId}/approvals?status=pending` | List pending approval requests without changing them. |
+| `GET` | `/api/companies/{companyId}/decisions/stats?groupBy=ruleKey` | Read decision telemetry. An agent may request only its own `originAgentId`; optional `since` is an ISO timestamp. |
+
+Resolve a standalone decision with an existing option id:
+
+```json
+POST /api/decisions/{decisionId}/decide
+{
+  "optionId": "reassign",
+  "inputValues": {},
+  "idempotencyKey": "decision-resolution:{decisionId}:reassign"
+}
+```
+
+Dismiss one with `POST /api/decisions/{decisionId}/dismiss` and optional `{ "reason": "..." }`. For formal approvals, use `POST /api/approvals/{approvalId}/approve`, `/reject`, or `/request-revision`, with optional `{ "decisionNote": "..." }`. Never invent an option, rewrite stored effects, or resolve an existing decision merely to test access. Include the run-id header on every mutation.
+
+Decision creation is for an originating issue-scoped run and derives `originAgentId`, `originRunId`, and `originIssueId` from that authenticated context; do not add those server-owned fields to the request body. Decision resolution records `decidedByAgentId` and `decidedByRunId` for auditability. `canManageDecisions` does not grant decision-queue, triage, retention, archive-proposal, arbitrary issue, or decision-creation authority; those use their own authorization paths. Cancellation remains limited to the board or the decision's origin agent.
 
 Create a `request_checkbox_confirmation` (board selects any subset, then confirms):
 

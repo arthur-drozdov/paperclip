@@ -3,7 +3,7 @@ title: Approvals
 summary: Approval workflow endpoints
 ---
 
-Approvals gate certain actions (agent hiring, CEO strategy) behind board review.
+Approvals gate certain actions (agent hiring, CEO strategy) behind formal review. Board users may resolve them directly. A board user may also explicitly grant a standard-trust agent `canManageDecisions`; that delegated agent may resolve approvals only from an attributable live run with responsible-user context. The audit trail retains the responsible user and records the delegate agent and run. Creating, commenting on, resubmitting, or reading an approval follows its existing resource-access rules and does not imply decision-management authority.
 
 ## List Approvals
 

@@ -1225,6 +1225,7 @@ Terminal states: `done`, `cancelled`
 | GET    | `/api/companies/:companyId/agents` | List all agents in company           |
 | POST   | `/api/companies/:companyId/agents` | Create agent directly (no approval)  |
 | PATCH  | `/api/agents/:agentId`             | Update agent config or budget        |
+| PATCH  | `/api/agents/:agentId/permissions` | Board-only permission update; supports `canAssignTasks`, `canCreateAgents`, `canCreateSkills`, `canManageDecisions`, `trustPreset`, and `authorizationPolicy` |
 | POST   | `/api/agents/:agentId/pause`       | Temporarily stop heartbeats          |
 | POST   | `/api/agents/:agentId/resume`      | Resume a paused agent                |
 | POST   | `/api/agents/:agentId/terminate`   | Permanently deactivate agent (irreversible) |
@@ -1316,6 +1317,24 @@ Terminal states: `done`, `cancelled`
 | POST   | `/api/routine-triggers/public/:publicId/fire` | Fire webhook trigger from external system |
 | GET    | `/api/routines/:routineId/runs` | Run history (default 50) |
 
+### Decisions and Attention
+
+Company-wide decision management is board-controlled. Agents without the explicit `canManageDecisions` permission retain origin-scoped decision access. Delegated agents must be active and non-low-trust. Listing and reading company decisions requires the delegated permission; the attention feed additionally requires responsible-user context. Decision and approval mutations require both responsible-user context and an attributable live run. Resolution preserves the responsible user's accountability and records the delegate agent and run in server-owned audit metadata. Decision queues, triage, retention, archive proposals, and arbitrary issue access remain separate authorization surfaces.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/api/companies/:companyId/decisions` | List decisions; optional `status`, `bundleId`, `targetIssueId`, `originAgentId`, and `limit` filters |
+| GET | `/api/companies/:companyId/decisions/stats?groupBy=ruleKey` | Decision telemetry; optional `originAgentId` and ISO `since` filters; agents may query only their own origin id |
+| POST | `/api/companies/:companyId/decisions` | Create a decision from the authenticated run |
+| POST | `/api/companies/:companyId/decision-bundles` | Atomically create 1–50 related decisions |
+| GET | `/api/decisions/:decisionId` | Read a decision and its outcome |
+| POST | `/api/decisions/:decisionId/decide` | Resolve with `{ "optionId": string, "inputValues"?: object, "idempotencyKey"?: string }` |
+| POST | `/api/decisions/:decisionId/dismiss` | Dismiss with optional `{ "reason": string }` |
+| POST | `/api/decisions/:decisionId/cancel` | Cancel an originated decision |
+| GET | `/api/companies/:companyId/attention` | List company attention items; supports `sort=activity|decide`, `activitySince`, `activityUntil`, pagination, queue, dismissal, and archive filters |
+
+Decision creation is for an originating issue-scoped live run. Origin fields are server-owned: `originAgentId`, `originRunId`, and `originIssueId` come from that authenticated context; do not send them in the create payload. Cancellation remains limited to the board or origin agent. On every mutation include `X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID` as well as the run JWT.
+
 ### Approvals, Costs, Activity, Dashboard
 
 | Method | Path                                         | Description                        |
@@ -1327,9 +1346,9 @@ Terminal states: `done`, `cancelled`
 | GET    | `/api/approvals/:approvalId/issues`          | Issues linked to approval          |
 | GET    | `/api/approvals/:approvalId/comments`        | Approval comments                  |
 | POST   | `/api/approvals/:approvalId/comments`        | Add approval comment               |
-| POST   | `/api/approvals/:approvalId/approve`         | Approve approval request           |
-| POST   | `/api/approvals/:approvalId/reject`          | Reject approval request            |
-| POST   | `/api/approvals/:approvalId/request-revision`| Board asks for revision            |
+| POST   | `/api/approvals/:approvalId/approve`         | Approve approval request; optional `{ "decisionNote": string }` |
+| POST   | `/api/approvals/:approvalId/reject`          | Reject approval request; optional `{ "decisionNote": string }` |
+| POST   | `/api/approvals/:approvalId/request-revision`| Request revision; optional `{ "decisionNote": string }` |
 | POST   | `/api/approvals/:approvalId/resubmit`        | Resubmit revised approval          |
 | POST   | `/api/companies/:companyId/cost-events`      | Report cost event                  |
 | GET    | `/api/companies/:companyId/costs/summary`    | Company cost summary               |

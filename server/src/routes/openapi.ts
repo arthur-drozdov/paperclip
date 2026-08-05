@@ -3301,7 +3301,7 @@ registry.registerPath({
   method: "get",
   path: "/api/companies/{companyId}/attention",
   tags: ["inbox"],
-  summary: "List decision-only attention feed items",
+  summary: "List company attention feed items",
   request: {
     params: z.object({ companyId: z.string() }),
     query: z.object({
