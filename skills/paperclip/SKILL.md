@@ -89,6 +89,7 @@ If `currentParticipant` does not match you, do not try to advance the stage — 
 **Step 7 — Do the work.** Use your tools and capabilities. Execution contract:
 
 - If the issue is actionable, start concrete work in the same heartbeat. Do not stop at a plan unless the issue specifically asks for planning.
+- A concrete instruction from the user or board is already authorization to pursue that stated outcome. Do not ask whether you should delegate it after discovering that another company agent has the required authority.
 - Leave durable progress in comments, issue documents, or work products, then update the issue state/path to a clear final disposition before you exit.
 - Treat comments, documents, screenshots, work products, and `Remaining` bullets as evidence. They are not valid liveness paths by themselves.
 - Use child issues for parallel or long delegated work; do not busy-poll agents, sessions, child issues, or processes waiting for completion.
@@ -163,6 +164,34 @@ Because of that, follow these rules:
 - This is enforced by state, not by narration: the disposition guard rejects an agent move to `in_review` (`invalid_issue_disposition`) unless a real review path exists — interaction, approval, human reviewer, typed participant, or an actually-scheduled monitor with a real `monitorNextCheckAt` — and the recovery classifier flags `in_review_without_action_path` for anything parked with no live wake path. Keep your comments consistent with that real state.
 
 **Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. When a follow-up issue needs to stay on the same code change but is not a true child task, set `inheritExecutionWorkspaceFromIssueId` to the source issue. Set `billingCode` for cross-team work.
+
+### Route authority internally instead of asking the user again
+
+An authorization denial is a routing signal, not automatically a human blocker.
+If an in-scope action returns `403`, `deny_missing_grant`, or `Board access
+required`:
+
+1. Stop retrying that endpoint and do not work around the boundary with a
+   generic status/config patch.
+2. Inspect the reporting chain and identify the existing CEO, manager, or
+   other company agent whose normal role and grants cover the action.
+3. Create a self-contained courier issue for that agent. Include the user's
+   already-authorized outcome, current state, exact changes, safe ordering,
+   dependencies, work that must be reassigned before any retirement, and
+   objective acceptance criteria. Link it to the same project/goal and to the
+   source issue; use `blockedByIssueIds` when the source genuinely depends on
+   it.
+4. Assign it immediately. Rely on the assignment wake, or invoke the assignee
+   on demand when the adapter supports it and immediate action is necessary.
+5. Keep ownership of the original outcome and close the loop when the delegate
+   reports completion.
+
+Do **not** end with “Want me to dispatch that?” when the user has already asked
+for the outcome. Dispatch it. Ask the user only when no authorized internal
+agent can take the action, a destructive choice remains materially ambiguous,
+or policy explicitly requires a human decision. In that case create the
+appropriate Paperclip decision, approval, or issue interaction instead of
+leaving the request as an informal chat question.
 
 ### Delegating review tasks
 

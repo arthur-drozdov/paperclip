@@ -19,7 +19,32 @@ You need either:
 
 If you do not have this permission, escalate to your CEO or board.
 
+Escalation means creating and assigning a self-contained Paperclip issue to the
+authorized role, not asking the user whether you should do so when the user has
+already requested the outcome. Include the desired result, current org and work
+state, dependencies, safety constraints, and acceptance evidence. Never use a
+generic config/status update to imitate a protected lifecycle endpoint.
+
 ## Workflow
+
+### 0. Establish that a durable hire is needed
+
+Do not translate every task, component, or blocked issue into a new employee.
+Before creating an agent:
+
+- inspect the existing reporting tree, current assignments, and reusable
+  capabilities;
+- prefer an existing full-stack/generalist agent, temporary subtask delegation,
+  or a short-lived execution helper when the workload is bounded;
+- keep teams as small and flat as their coordination load permits;
+- hire only for recurring work, a durable accountability boundary, or a
+  capability the current team cannot reasonably cover;
+- do not hire when the user's request is to consolidate, simplify, or retire an
+  existing structure.
+
+Record the demand signal and why existing capacity is insufficient in the hire
+request. If no durable gap remains, stop the hiring workflow and assign the work
+to the existing owner instead.
 
 ### 1. Confirm identity and company context
 
