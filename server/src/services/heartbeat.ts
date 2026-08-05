@@ -12556,7 +12556,12 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     const claimedContext = parseObject(claimed.contextSnapshot);
     const claimedIssueId = readNonEmptyString(claimedContext.issueId);
     const claimedWakeReason = readNonEmptyString(claimedContext.wakeReason);
-    if (claimedIssueId && claimedWakeReason !== "source_scoped_recovery_action") {
+    const claimedIsBlockedInteraction = claimedContext.dependencyBlockedInteraction === true;
+    if (
+      claimedIssueId &&
+      claimedWakeReason !== "source_scoped_recovery_action" &&
+      !claimedIsBlockedInteraction
+    ) {
       const claimedAgent = await getAgent(claimed.agentId);
       await db
         .update(issues)

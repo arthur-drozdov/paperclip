@@ -152,16 +152,6 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
   }, 20_000);
 
   afterEach(async () => {
-    mockAdapterExecute.mockReset();
-    mockAdapterExecute.mockImplementation(async () => ({
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      errorMessage: null,
-      summary: "Stale-queue invalidation test run.",
-      provider: "test",
-      model: "test-model",
-    }));
     runningProcesses.clear();
     let idlePolls = 0;
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -179,6 +169,19 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
     await cleanupHeartbeatInvalidationFixture(db);
+    // Reset only after asynchronous heartbeat work has drained. Resetting the
+    // mock first lets a continuation from the preceding test register as an
+    // execution in the next test and creates an order-dependent false failure.
+    mockAdapterExecute.mockReset();
+    mockAdapterExecute.mockImplementation(async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      errorMessage: null,
+      summary: "Stale-queue invalidation test run.",
+      provider: "test",
+      model: "test-model",
+    }));
   });
 
   afterAll(async () => {
