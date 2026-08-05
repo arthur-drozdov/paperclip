@@ -19,6 +19,7 @@ export const agentSkillSyncModeSchema = z.enum([
   "unsupported",
   "persistent",
   "ephemeral",
+  "external",
 ]);
 
 export const agentDesiredSkillEntrySchema = z.object({

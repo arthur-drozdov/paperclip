@@ -15,7 +15,7 @@ Use this skill when you are asked to hire/create an agent.
 You need either:
 
 - board access, or
-- agent permission `can_create_agents=true` in your company
+- agent permission `canCreateAgents=true` in your company
 
 If you do not have this permission, escalate to your CEO or board.
 

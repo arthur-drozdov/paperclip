@@ -233,7 +233,7 @@ export interface AdapterEnvironmentTestResult {
   testedAt: string;
 }
 
-export type AdapterSkillSyncMode = "unsupported" | "persistent" | "ephemeral";
+export type AdapterSkillSyncMode = "unsupported" | "persistent" | "ephemeral" | "external";
 
 export type AdapterSkillState =
   | "available"

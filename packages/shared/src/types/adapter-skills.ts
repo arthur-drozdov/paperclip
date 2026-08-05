@@ -1,4 +1,4 @@
-export type AgentSkillSyncMode = "unsupported" | "persistent" | "ephemeral";
+export type AgentSkillSyncMode = "unsupported" | "persistent" | "ephemeral" | "external";
 
 export type AgentSkillState =
   | "available"

@@ -226,6 +226,8 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
   );
 
   const unsupported = skillSnapshot?.mode === "unsupported";
+  const externallyManaged = skillSnapshot?.mode === "external";
+  const readOnly = unsupported || externallyManaged;
 
   // Library skills → row models (the store's visual language, tuned for rows).
   const libraryRows = useMemo<AgentSkillRowData[]>(
@@ -299,12 +301,17 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
         return "Applied on next run";
       case "unsupported":
         return "Tracked only";
+      case "external":
+        return "Managed by deployment";
       default:
         return null;
     }
   }, [skillSnapshot?.mode]);
 
-  const unsupportedMessage = useMemo(() => {
+  const readOnlyMessage = useMemo(() => {
+    if (externallyManaged) {
+      return "This agent's external runtime owns skill installation and verification. Paperclip records the intended assignments here without changing that runtime.";
+    }
     if (!unsupported) return null;
     if (
       agent.adapterType === "acpx_local" &&
@@ -317,7 +324,7 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
       return "Paperclip cannot manage OpenClaw skills here. Visit your OpenClaw instance to manage this agent's skills.";
     }
     return "Paperclip cannot manage skills for this adapter yet. Manage them in the adapter directly.";
-  }, [agent.adapterConfig.agent, agent.adapterType, unsupported]);
+  }, [agent.adapterConfig.agent, agent.adapterType, externallyManaged, unsupported]);
 
   const hasUnsavedChanges = !sameSkillSelection(skillDraft, lastSavedSkills);
 
@@ -358,8 +365,8 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
         variant={variant}
         data={row}
         checked={variant === "enabled"}
-        disabled={unsupported}
-        disabledReason={unsupportedMessage}
+        disabled={readOnly}
+        disabledReason={readOnlyMessage}
         onCheckedChange={(next) => toggleSkill(row.key, next)}
         badge={
           showReleasePicker && pinnedRelease ? (
@@ -373,7 +380,7 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
             <AgentSkillReleasePicker
               releases={paperclipReleases}
               value={pinnedVersionId}
-              disabled={unsupported || syncSkills.isPending}
+              disabled={readOnly || syncSkills.isPending}
               onChange={(versionId) => handleReleaseChange(row.key, versionId)}
             />
           ) : undefined
@@ -400,7 +407,7 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
                 </span>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs">
-                {unsupported ? unsupportedMessage : MATERIALIZATION_NOTE}
+                {readOnly ? readOnlyMessage : MATERIALIZATION_NOTE}
               </TooltipContent>
             </Tooltip>
           ) : null}
@@ -436,10 +443,10 @@ export function AgentSkillsTab({ agent, companyId }: { agent: Agent; companyId?:
         ) : null}
       </div>
 
-      {/* Unsupported adapter banner */}
-      {unsupportedMessage ? (
+      {/* Read-only adapter banner */}
+      {readOnlyMessage ? (
         <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          {unsupportedMessage}
+          {readOnlyMessage}
         </div>
       ) : null}
 
