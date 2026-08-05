@@ -42,6 +42,7 @@ const additionalSerializedServerTests = new Set([
   "server/src/__tests__/heartbeat-dependency-scheduling.test.ts",
   "server/src/__tests__/heartbeat-issue-liveness-escalation.test.ts",
   "server/src/__tests__/heartbeat-process-recovery.test.ts",
+  "server/src/__tests__/heartbeat-stale-queue-invalidation.test.ts",
   "server/src/__tests__/invite-accept-existing-member.test.ts",
   "server/src/__tests__/invite-accept-gateway-defaults.test.ts",
   "server/src/__tests__/invite-accept-replay.test.ts",
