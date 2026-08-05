@@ -387,6 +387,23 @@ const WORKSPACE_VALIDATION_FAILURE_CODE = "workspace_validation_failed";
 const WORKSPACE_VALIDATION_RECOVERY_CAUSE = "workspace_validation_failed";
 const CONFIGURATION_INCOMPLETE_FAILURE_CODE = "configuration_incomplete";
 const CONFIGURATION_INCOMPLETE_RECOVERY_CAUSE = "configuration_incomplete";
+// A daily run allowance is intended to bound agent work, not to punish a
+// leader for a run that could not reach its adapter because Paperclip's own
+// setup or gateway authentication was unavailable.  Keep this list narrowly
+// typed: ambiguous adapter failures still consume the allowance so a broken
+// integration cannot spin indefinitely.  The list is used in the SQL cap
+// query below, so additions must remain stable, explicit error codes.
+const DAILY_RUN_CAP_PRE_EXECUTION_ERROR_CODES = [
+  "setup_failed",
+  WORKSPACE_VALIDATION_FAILURE_CODE,
+  CONFIGURATION_INCOMPLETE_FAILURE_CODE,
+  "model_not_found",
+  "agent_not_invokable",
+  "openclaw_gateway_pairing_required",
+  "openclaw_gateway_auth_required",
+  "openclaw_gateway_auth_failed",
+  "openclaw_gateway_request_failed",
+] as const;
 const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_RETRY_REASON = "execution_review_participant_recovery";
 const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_WAKE_REASON = "execution_review_participant_recovery";
 const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_CAUSE = "execution_review_participant_recovery";
@@ -12095,6 +12112,14 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         gte(heartbeatRuns.startedAt, start),
         lt(heartbeatRuns.startedAt, end),
         notInArray(heartbeatRuns.status, ["queued", "scheduled_retry"]),
+        // Runs which failed before the adapter could do any work do not spend
+        // the agent's productive daily allowance.  Preserve the conservative
+        // anti-loop behaviour for all other terminal outcomes, including
+        // generic adapter failures and started cancellations.
+        or(
+          isNull(heartbeatRuns.errorCode),
+          notInArray(heartbeatRuns.errorCode, [...DAILY_RUN_CAP_PRE_EXECUTION_ERROR_CODES]),
+        ),
       ];
       if (options.excludeRunId) {
         conditions.push(sql`${heartbeatRuns.id} <> ${options.excludeRunId}`);

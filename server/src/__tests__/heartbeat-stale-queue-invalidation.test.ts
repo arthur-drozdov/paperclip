@@ -603,6 +603,76 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     });
   });
 
+  it.each([
+    "setup_failed",
+    "configuration_incomplete",
+    "workspace_validation_failed",
+    "model_not_found",
+    "openclaw_gateway_pairing_required",
+    "openclaw_gateway_auth_required",
+    "openclaw_gateway_auth_failed",
+    "openclaw_gateway_request_failed",
+  ])("does not spend the daily work allowance on pre-execution infrastructure failure: %s", async (errorCode) => {
+    const { companyId, agentId } = await seedCompanyAndAgent({
+      heartbeatConfig: {
+        maxDailyRuns: 1,
+      },
+    });
+    await db.insert(heartbeatRuns).values({
+      id: randomUUID(),
+      companyId,
+      agentId,
+      invocationSource: "on_demand",
+      triggerDetail: "manual",
+      status: "failed",
+      error: "Infrastructure was unavailable before adapter work began",
+      errorCode,
+      createdAt: new Date(),
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      contextSnapshot: {},
+    });
+
+    const run = await heartbeat.wakeup(agentId, {
+      source: "on_demand",
+      triggerDetail: "manual",
+    });
+
+    expect(run).not.toBeNull();
+    await waitForCondition(async () => countExecuteCallsForRun(run!.id) > 0);
+    expect(countExecuteCallsForRun(run!.id)).toBe(1);
+  });
+
+  it("keeps ambiguous adapter failures counted so a broken integration cannot loop", async () => {
+    const { companyId, agentId } = await seedCompanyAndAgent({
+      heartbeatConfig: {
+        maxDailyRuns: 1,
+      },
+    });
+    await db.insert(heartbeatRuns).values({
+      id: randomUUID(),
+      companyId,
+      agentId,
+      invocationSource: "on_demand",
+      triggerDetail: "manual",
+      status: "failed",
+      error: "Adapter failed after invocation",
+      errorCode: "adapter_failed",
+      createdAt: new Date(),
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      contextSnapshot: {},
+    });
+
+    const run = await heartbeat.wakeup(agentId, {
+      source: "on_demand",
+      triggerDetail: "manual",
+    });
+
+    expect(run).toBeNull();
+    expect(mockAdapterExecute).not.toHaveBeenCalled();
+  });
+
   it("coalesces same-issue wakes before enforcing the daily run cap", async () => {
     const { companyId, agentId } = await seedCompanyAndAgent({
       heartbeatConfig: {
