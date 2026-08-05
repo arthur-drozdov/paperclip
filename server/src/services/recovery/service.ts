@@ -26,6 +26,9 @@ import {
   issueRelations,
   issueThreadInteractions,
   issues,
+  routineRevisions,
+  routineRuns,
+  routines,
 } from "@paperclipai/db";
 import { parseObject, asBoolean, asNumber } from "../../adapters/utils.js";
 import { runningProcesses } from "../../adapters/index.js";
@@ -2536,10 +2539,66 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     ].join("\n");
   }
 
+  /**
+   * Routine-created issues are execution records for a configured routine,
+   * not ordinary work that recovery may hand to the manager ladder. Resolve
+   * the owner from the routine revision captured by the originating run so a
+   * later routine edit (or an earlier recovery bug) cannot silently change
+   * accountability for that execution.
+   */
+  async function resolveRoutineExecutionConfiguredAssigneeAgentId(
+    issue: typeof issues.$inferSelect,
+  ) {
+    if (issue.originKind !== "routine_execution" || !issue.originRunId) return null;
+
+    const row = await db
+      .select({
+        routineAssigneeAgentId: routines.assigneeAgentId,
+        revisionSnapshot: routineRevisions.snapshot,
+      })
+      .from(routineRuns)
+      .leftJoin(
+        routines,
+        and(
+          eq(routines.companyId, issue.companyId),
+          eq(routines.id, routineRuns.routineId),
+        ),
+      )
+      .leftJoin(
+        routineRevisions,
+        and(
+          eq(routineRevisions.companyId, issue.companyId),
+          eq(routineRevisions.id, routineRuns.routineRevisionId),
+        ),
+      )
+      .where(and(
+        eq(routineRuns.companyId, issue.companyId),
+        eq(routineRuns.id, issue.originRunId),
+      ))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+
+    const snapshotRoutine = parseObject(parseObject(row?.revisionSnapshot).routine);
+    return readNonEmptyString(snapshotRoutine.assigneeAgentId) ??
+      readNonEmptyString(row?.routineAssigneeAgentId) ??
+      // The issue is itself a durable snapshot of the configured assignee;
+      // retain it if old routine-run rows predate revision snapshots.
+      readNonEmptyString(issue.assigneeAgentId);
+  }
+
   async function resolveStrandedIssueRecoveryOwnerAgentId(
     issue: typeof issues.$inferSelect,
     preferredOwnerAgentId?: string | null,
   ) {
+    const routineOwnerAgentId = await resolveRoutineExecutionConfiguredAssigneeAgentId(issue);
+    if (routineOwnerAgentId) {
+      // A routine execution may be blocked while its configured owner is
+      // paused, quota-limited, or otherwise unavailable. Keep the recovery
+      // action for board/manual intervention rather than transferring the
+      // routine to a manager who was never configured to run it.
+      return (await resolveInvokableRecoveryAgentId(issue, routineOwnerAgentId)) ?? null;
+    }
+
     const candidateIds: string[] = [];
     if (preferredOwnerAgentId) candidateIds.push(preferredOwnerAgentId);
     if (issue.assigneeAgentId) {
@@ -2597,7 +2656,34 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     preferredOwnerAgentId?: string | null;
   }) {
     const originalAgentId = input.latestRun?.agentId ?? input.issue.assigneeAgentId;
-    const returnOwnerAgentId = input.issue.assigneeAgentId ?? originalAgentId;
+    const routineOwnerAgentId = await resolveRoutineExecutionConfiguredAssigneeAgentId(input.issue);
+    const returnOwnerAgentId = routineOwnerAgentId ?? input.issue.assigneeAgentId ?? originalAgentId;
+
+    if (routineOwnerAgentId) {
+      const configuredOwnerInvokable = await resolveInvokableRecoveryAgentId(input.issue, routineOwnerAgentId);
+      if (input.recoveryCause === "provider_quota") {
+        return {
+          ownerAgentId: null,
+          returnOwnerAgentId: routineOwnerAgentId,
+          routingFallbackReason: configuredOwnerInvokable
+            ? null
+            : "The routine remains owned by its configured assignee; quota recovery will wait for that owner instead of taking over.",
+        };
+      }
+      if (configuredOwnerInvokable) {
+        return {
+          ownerAgentId: configuredOwnerInvokable,
+          returnOwnerAgentId: routineOwnerAgentId,
+          routingFallbackReason: null,
+        };
+      }
+      return {
+        ownerAgentId: null,
+        returnOwnerAgentId: routineOwnerAgentId,
+        routingFallbackReason: "The routine remains owned by its configured assignee; recovery is blocked for manual repair instead of transferring it.",
+      };
+    }
+
     const routeToOriginal = input.recoveryCause === "process_lost" ||
       input.recoveryCause === SUCCESSFUL_RUN_MISSING_STATE_REASON ||
       input.recoveryCause === "codex_output_inactivity_monitor";
@@ -2890,6 +2976,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       recoveryCause,
       preferredOwnerAgentId: input.recoveryOwnerAgentId,
     });
+    const routineOwnerAgentId = await resolveRoutineExecutionConfiguredAssigneeAgentId(input.issue);
     const ownerAgentId = routing.ownerAgentId;
     const now = new Date();
     const action = await recoveryActionsSvc.upsertSourceScoped({
@@ -2898,7 +2985,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       kind: strandedRecoveryActionKind(recoveryCause),
       ownerType: recoveryCause === "provider_quota" && !ownerAgentId ? "system" : ownerAgentId ? "agent" : "board",
       ownerAgentId,
-      previousOwnerAgentId: input.issue.assigneeAgentId,
+      previousOwnerAgentId: routineOwnerAgentId ?? input.issue.assigneeAgentId,
       returnOwnerAgentId: routing.returnOwnerAgentId,
       cause: recoveryCause,
       fingerprint: strandedRecoveryActionFingerprint({
@@ -3336,9 +3423,10 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       recoveryOwnerAgentId: input.recoveryOwnerAgentId,
       successfulRunHandoffEvidence: input.successfulRunHandoffEvidence,
     });
+    const routineOwnerAgentId = await resolveRoutineExecutionConfiguredAssigneeAgentId(input.issue);
     const isProviderQuotaWait = recoveryCause === "provider_quota" &&
       !recoveryAction.ownerAgentId &&
-      Boolean(recoveryAction.returnOwnerAgentId);
+        Boolean(recoveryAction.returnOwnerAgentId);
     if (isProviderQuotaWait && recoveryAction.returnOwnerAgentId) {
       await ensureProviderQuotaWaitRecoveryMonitor({
         issue: input.issue,
@@ -3351,14 +3439,18 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     const updated = await issuesSvc.update(input.issue.id, {
       status: "blocked",
       blockedByIssueIds: blockerIds,
-      assigneeAgentId: recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId,
+      // Routine execution accountability is configured on the routine (and
+      // snapshotted on its run). A recovery manager may own a separate
+      // recovery action, but must not become the routine's assignee.
+      assigneeAgentId: routineOwnerAgentId ?? recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId,
     });
     if (!updated) return null;
     if (isProviderQuotaWait) return updated;
 
     const prefix = await getCompanyIssuePrefix(input.issue.companyId);
     const recoveryOwner = recoveryAction.ownerAgentId ? await getAgent(recoveryAction.ownerAgentId) : null;
-    const sourceAssignee = input.issue.assigneeAgentId ? await getAgent(input.issue.assigneeAgentId) : null;
+    const sourceAssigneeAgentId = routineOwnerAgentId ?? input.issue.assigneeAgentId;
+    const sourceAssignee = sourceAssigneeAgentId ? await getAgent(sourceAssigneeAgentId) : null;
     let notice: SuccessfulRunHandoffNotice | null = null;
     if (input.recoveryCause === SUCCESSFUL_RUN_MISSING_STATE_REASON && input.successfulRunHandoffEvidence) {
       notice = buildSuccessfulRunHandoffExhaustedNotice({
@@ -3482,7 +3574,8 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       recoveryCause,
     });
 
-    if (recoveryAction.ownerAgentId && recoveryAction.ownerAgentId === input.issue.assigneeAgentId) {
+    const desiredAssigneeAgentId = routineOwnerAgentId ?? recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId;
+    if (desiredAssigneeAgentId) {
       const [currentIssue] = await db
         .select({
           status: issues.status,
@@ -3494,12 +3587,12 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       if (
         currentIssue &&
         (currentIssue.status !== "blocked" ||
-          currentIssue.assigneeAgentId !== recoveryAction.ownerAgentId)
+          currentIssue.assigneeAgentId !== desiredAssigneeAgentId)
       ) {
         const reblocked = await issuesSvc.update(input.issue.id, {
           status: "blocked",
           blockedByIssueIds: blockerIds,
-          assigneeAgentId: recoveryAction.ownerAgentId,
+          assigneeAgentId: desiredAssigneeAgentId,
         });
         if (reblocked) return reblocked;
       }
@@ -3559,7 +3652,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   }) {
     if (input.issue.status !== "in_progress" && input.issue.status !== "in_review") return null;
 
-    const targetAgentId = getAdapterFailureRecoveryTargetAgentId(input.issue);
+    const targetAgentId = await resolveAdapterFailureRecoveryTargetAgentId(input.issue);
     if (!targetAgentId || input.latestRun.agentId !== targetAgentId) return null;
 
     const previousPolicy = normalizeIssueExecutionPolicy(input.issue.executionPolicy ?? null);
@@ -3620,8 +3713,10 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     return updated;
   }
 
-  function getAdapterFailureRecoveryTargetAgentId(issue: typeof issues.$inferSelect) {
-    if (issue.status !== "in_review") return issue.assigneeAgentId;
+  async function resolveAdapterFailureRecoveryTargetAgentId(issue: typeof issues.$inferSelect) {
+    if (issue.status !== "in_review") {
+      return await resolveRoutineExecutionConfiguredAssigneeAgentId(issue) ?? issue.assigneeAgentId;
+    }
 
     const pendingExecutionState = parseIssueExecutionState(issue.executionState);
     const participant = pendingExecutionState?.status === "pending"
@@ -3684,9 +3779,10 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         ? pendingExecutionState.currentParticipant
         : null;
       const participantAgentId = currentParticipant?.type === "agent" ? currentParticipant.agentId : null;
+      const routineOwnerAgentId = await resolveRoutineExecutionConfiguredAssigneeAgentId(issue);
       const agentId = issue.status === "in_review" && participantAgentId
         ? participantAgentId
-        : issue.assigneeAgentId;
+        : routineOwnerAgentId ?? issue.assigneeAgentId;
       if (!agentId) {
         result.skipped += 1;
         continue;
@@ -3759,7 +3855,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         ? classifyAdapterFailureForRecovery(latestRun, recoveryNow)
         : null;
       if (latestRun && adapterFailureClassification) {
-        const targetAgentId = getAdapterFailureRecoveryTargetAgentId(issue);
+        const targetAgentId = await resolveAdapterFailureRecoveryTargetAgentId(issue);
         if (!targetAgentId || latestRun.agentId !== targetAgentId) {
           result.skipped += 1;
           continue;

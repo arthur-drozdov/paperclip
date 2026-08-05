@@ -40,6 +40,9 @@ import {
   issues,
   projects,
   projectWorkspaces,
+  routineRevisions,
+  routineRuns,
+  routines,
   workspaceOperations,
 } from "@paperclipai/db";
 import {
@@ -392,6 +395,9 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await db.delete(issueRecoveryActions);
     await db.delete(issueTreeHoldMembers);
     await db.delete(issueTreeHolds);
+    await db.delete(routineRuns);
+    await db.delete(routineRevisions);
+    await db.delete(routines);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await db.delete(issueComments);
       await db.delete(issueDocuments);
@@ -3273,6 +3279,104 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       return rows.find((comment) => comment.body.includes("secret/env bindings are missing")) ?? null;
     });
     expect(configurationComment).toBeTruthy();
+  });
+
+  it("keeps routine execution recovery with the configured routine assignee", async () => {
+    const { companyId, agentId, runId, issueId } = await seedStrandedIssueFixture({
+      status: "in_progress",
+      runStatus: "failed",
+      runErrorCode: "configuration_incomplete",
+      runError: "routine agent configuration is incomplete",
+    });
+    const managerId = randomUUID();
+    await db.insert(agents).values({
+      id: managerId,
+      companyId,
+      name: "Engineering Manager",
+      role: "cto",
+      status: "idle",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const routineId = randomUUID();
+    const revisionId = randomUUID();
+    const triggeredAt = new Date("2026-03-19T00:00:00.000Z");
+    await db.insert(routines).values({
+      id: routineId,
+      companyId,
+      title: "Board review routine",
+      description: "Review the board and record the next action.",
+      assigneeAgentId: agentId,
+      status: "active",
+    });
+    await db.insert(routineRevisions).values({
+      id: revisionId,
+      companyId,
+      routineId,
+      revisionNumber: 1,
+      title: "Board review routine",
+      snapshot: {
+        routine: {
+          id: routineId,
+          companyId,
+          assigneeAgentId: agentId,
+          title: "Board review routine",
+        },
+        triggers: [],
+      },
+    });
+    await db.insert(routineRuns).values({
+      id: runId,
+      companyId,
+      routineId,
+      source: "schedule",
+      status: "failed",
+      triggeredAt,
+      routineRevisionId: revisionId,
+      linkedIssueId: issueId,
+    });
+    await db
+      .update(issues)
+      .set({
+        originKind: "routine_execution",
+        originId: routineId,
+        originRunId: runId,
+      })
+      .where(eq(issues.id, issueId));
+
+    const heartbeat = heartbeatService(db);
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+    expect(result.escalated).toBe(1);
+    expect(result.issueIds).toEqual([issueId]);
+
+    const recoveredIssue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(recoveredIssue).toMatchObject({
+      status: "blocked",
+      assigneeAgentId: agentId,
+      originKind: "routine_execution",
+      originRunId: runId,
+    });
+
+    const recoveryAction = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(and(eq(issueRecoveryActions.companyId, companyId), eq(issueRecoveryActions.sourceIssueId, issueId)))
+      .then((rows) => rows[0] ?? null);
+    expect(recoveryAction).toMatchObject({
+      cause: "configuration_incomplete",
+      ownerType: "agent",
+      ownerAgentId: agentId,
+      previousOwnerAgentId: agentId,
+      returnOwnerAgentId: agentId,
+    });
+    expect(recoveryAction?.ownerAgentId).not.toBe(managerId);
   });
 
   it("queues one finish-handoff wake when a successful run leaves in-progress work without a next action", async () => {
