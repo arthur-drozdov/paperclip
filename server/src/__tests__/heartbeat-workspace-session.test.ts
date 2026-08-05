@@ -441,6 +441,25 @@ describe("assertGitSensitiveAdapterWorkspaceValid", () => {
     );
   });
 
+  it("allows OpenCode to use a non-Git project workspace while retaining workspace binding", async () => {
+    const input = buildWorkspaceValidationInput({
+      adapterType: "opencode_local",
+      resolvedWorkspace: buildResolvedWorkspace({ cwd: "/tmp/paperclip-non-git-project" }),
+      executionWorkspace: {
+        ...buildWorkspaceValidationInput().executionWorkspace,
+        cwd: "/tmp/paperclip-non-git-project",
+        baseCwd: "/tmp/paperclip-non-git-project",
+      },
+      persistedExecutionWorkspace: {
+        ...buildWorkspaceValidationInput().persistedExecutionWorkspace!,
+        cwd: "/tmp/paperclip-non-git-project",
+        providerType: "local_fs",
+      },
+    });
+
+    await expect(assertGitSensitiveAdapterWorkspaceValid(input)).resolves.toBeUndefined();
+  });
+
   it("does not apply the git-sensitive workspace guard to non-local execution targets", async () => {
     const input = buildWorkspaceValidationInput();
 

@@ -393,8 +393,11 @@ const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_CAUSE = "execution_review_participan
 const GITHUB_PR_WORKFLOW_SKILL_KEY = "paperclipai/bundled/software-development/github-pr-workflow";
 const GITHUB_PR_WORKFLOW_SKILL_SLUG = "github-pr-workflow";
 const PUSH_CAPABILITY_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN"] as const;
-// Keep this in sync with local adapters that require a git workspace before launch.
-const GIT_SENSITIVE_LOCAL_ADAPTER_TYPES = new Set([
+// Local adapters that must remain bound to a resolved project/session workspace when
+// an issue explicitly names one.  Workspace binding and Git metadata are separate
+// capabilities: an adapter can safely work in a non-Git project workspace while still
+// being prevented from silently falling back to an unrelated agent-home directory.
+const PROJECT_WORKSPACE_BOUND_LOCAL_ADAPTER_TYPES = new Set([
   "claude_local",
   "codex_local",
   "cursor",
@@ -402,6 +405,19 @@ const GIT_SENSITIVE_LOCAL_ADAPTER_TYPES = new Set([
   "grok_local",
   "hermes_local",
   "opencode_local",
+  "pi_local",
+]);
+// Keep this in sync with local adapters that require a Git checkout before launch.
+// OpenCode is intentionally not listed: its local CLI can work in a non-Git
+// workspace (for example a document/data project). Git-specific capabilities such
+// as the GitHub PR workflow perform their own push/checkout validation separately.
+const GIT_SENSITIVE_LOCAL_ADAPTER_TYPES = new Set([
+  "claude_local",
+  "codex_local",
+  "cursor",
+  "gemini_local",
+  "grok_local",
+  "hermes_local",
   "pi_local",
 ]);
 export const MAX_TURN_CONTINUATION_RETRY_REASON = "max_turns_continuation";
@@ -1994,7 +2010,9 @@ export async function assertGitSensitiveAdapterWorkspaceValid(input: {
   environmentDriver?: string | null;
   leaseMetadata?: unknown;
 }) {
-  if (!GIT_SENSITIVE_LOCAL_ADAPTER_TYPES.has(input.adapterType)) return;
+  const workspaceBindingRequired = PROJECT_WORKSPACE_BOUND_LOCAL_ADAPTER_TYPES.has(input.adapterType);
+  if (!workspaceBindingRequired) return;
+  const gitMetadataRequired = GIT_SENSITIVE_LOCAL_ADAPTER_TYPES.has(input.adapterType);
 
   const executionTargetKind = readNonEmptyString((input.executionTarget as { kind?: unknown } | null)?.kind) ?? "local";
   if (executionTargetKind !== "local") return;
@@ -2122,7 +2140,7 @@ export async function assertGitSensitiveAdapterWorkspaceValid(input: {
     );
   }
 
-  if (workspaceExpectation && effectiveCwd && !await hasGitMetadata(effectiveCwd)) {
+  if (gitMetadataRequired && workspaceExpectation && effectiveCwd && !await hasGitMetadata(effectiveCwd)) {
     fail(
       "missing_git_metadata",
       `Issue ${issue.identifier ?? issue.id} expected a git workspace for ${input.adapterType}, but "${effectiveCwd}" has no .git metadata.`,
