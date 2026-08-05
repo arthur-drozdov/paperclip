@@ -1203,7 +1203,7 @@ describe.sequential("issue comment reopen routes", () => {
     expect(mockIssueService.addComment).not.toHaveBeenCalled();
   });
 
-  it("does not move dependency-blocked issues to todo via POST comments", async () => {
+  it("wakes the assignee for triage without moving dependency-blocked issues to todo via POST comments", async () => {
     mockIssueService.getById.mockResolvedValue(makeIssue("blocked"));
     mockIssueService.getDependencyReadiness.mockResolvedValue({
       issueId: "11111111-1111-4111-8111-111111111111",
@@ -1217,6 +1217,89 @@ describe.sequential("issue comment reopen routes", () => {
     const res = await request(await installActor(createApp()))
       .post("/api/issues/11111111-1111-4111-8111-111111111111/comments")
       .send({ body: "what is happening?" });
+
+    expect(res.status).toBe(201);
+    expect(mockIssueService.update).not.toHaveBeenCalled();
+    await waitForWakeup(() => expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
+      "22222222-2222-4222-8222-222222222222",
+      expect.objectContaining({
+        reason: "issue_commented",
+        payload: expect.objectContaining({
+          issueId: "11111111-1111-4111-8111-111111111111",
+          commentId: "comment-1",
+          mutation: "comment",
+        }),
+        contextSnapshot: expect.objectContaining({
+          wakeReason: "issue_commented",
+          source: "issue.comment",
+        }),
+      }),
+    ));
+  });
+
+  it("does not wake blocked work for a local-CLI comment authenticated as a user", async () => {
+    const issue = { ...makeIssue("blocked"), checkoutRunId: "run-local-cli" };
+    mockIssueService.getById.mockResolvedValue(issue);
+    mockIssueService.getDependencyReadiness.mockResolvedValue({
+      issueId: issue.id,
+      blockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerCount: 1,
+      allBlockersDone: false,
+      isDependencyReady: false,
+    });
+
+    const res = await request(await installActor(createApp(), {
+      type: "board",
+      userId: "local-board",
+      companyIds: ["company-1"],
+      source: "local_implicit",
+      isInstanceAdmin: false,
+      runId: "run-local-cli",
+    }))
+      .post(`/api/issues/${issue.id}/comments`)
+      .send({ body: "agent follow-up while waiting on the prerequisite" });
+
+    expect(res.status).toBe(201);
+    expect(mockIssueService.update).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when dependency readiness cannot be read for a blocked human comment", async () => {
+    const issue = makeIssue("blocked");
+    mockIssueService.getById.mockResolvedValue(issue);
+    mockIssueService.getDependencyReadiness.mockRejectedValue(new Error("dependency store unavailable"));
+
+    const res = await request(await installActor(createApp(), {
+      type: "board",
+      userId: "local-board",
+      companyIds: ["company-1"],
+      source: "local_implicit",
+      isInstanceAdmin: false,
+    }))
+      .post(`/api/issues/${issue.id}/comments`)
+      .send({ body: "please explain the blocker" });
+
+    expect(res.status).toBe(201);
+    expect(mockIssueService.getDependencyReadiness).toHaveBeenCalledWith(issue.id);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an ordinary cross-agent comment as a blocked-work interaction wake", async () => {
+    mockIssueService.getById.mockResolvedValue(makeIssue("blocked"));
+    mockIssueService.getDependencyReadiness.mockResolvedValue({
+      issueId: "11111111-1111-4111-8111-111111111111",
+      blockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerCount: 1,
+      allBlockersDone: false,
+      isDependencyReady: false,
+    });
+
+    const res = await request(await installActor(createApp(), agentActor("44444444-4444-4444-8444-444444444444")))
+      .post("/api/issues/11111111-1111-4111-8111-111111111111/comments")
+      .send({ body: "peer status note while waiting on the prerequisite" });
 
     expect(res.status).toBe(201);
     expect(mockIssueService.update).not.toHaveBeenCalled();
@@ -1503,7 +1586,7 @@ describe.sequential("issue comment reopen routes", () => {
     expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
   });
 
-  it("does not move dependency-blocked issues to todo via the PATCH comment path", async () => {
+  it("wakes the assignee for triage without moving dependency-blocked issues to todo via the PATCH comment path", async () => {
     mockIssueService.getById.mockResolvedValue(makeIssue("blocked"));
     mockIssueService.getDependencyReadiness.mockResolvedValue({
       issueId: "11111111-1111-4111-8111-111111111111",
@@ -1532,6 +1615,55 @@ describe.sequential("issue comment reopen routes", () => {
     );
     expect(mockIssueService.update).not.toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
+      expect.objectContaining({ status: "todo" }),
+    );
+    await waitForWakeup(() => expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
+      "22222222-2222-4222-8222-222222222222",
+      expect.objectContaining({
+        reason: "issue_commented",
+        payload: expect.objectContaining({
+          issueId: "11111111-1111-4111-8111-111111111111",
+          commentId: "comment-1",
+          mutation: "comment",
+        }),
+        contextSnapshot: expect.objectContaining({
+          wakeReason: "issue_commented",
+          source: "issue.comment",
+        }),
+      }),
+    ));
+  });
+
+  it("does not wake blocked work for a local-CLI PATCH comment authenticated as a user", async () => {
+    const issue = { ...makeIssue("blocked"), checkoutRunId: "run-local-cli" };
+    mockIssueService.getById.mockResolvedValue(issue);
+    mockIssueService.getDependencyReadiness.mockResolvedValue({
+      issueId: issue.id,
+      blockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerIssueIds: ["33333333-3333-4333-8333-333333333333"],
+      unresolvedBlockerCount: 1,
+      allBlockersDone: false,
+      isDependencyReady: false,
+    });
+    mockIssueService.update.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...issue,
+      ...patch,
+    }));
+
+    const res = await request(await installActor(createApp(), {
+      type: "board",
+      userId: "local-board",
+      companyIds: ["company-1"],
+      source: "local_implicit",
+      isInstanceAdmin: false,
+      runId: "run-local-cli",
+    }))
+      .patch(`/api/issues/${issue.id}`)
+      .send({ comment: "agent follow-up while waiting on the prerequisite" });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueService.update).not.toHaveBeenCalledWith(
+      issue.id,
       expect.objectContaining({ status: "todo" }),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));

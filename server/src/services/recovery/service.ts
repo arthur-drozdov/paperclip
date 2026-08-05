@@ -130,6 +130,17 @@ type RecoveryWakeup = (
   opts?: RecoveryWakeupOptions,
 ) => Promise<typeof heartbeatRuns.$inferSelect | null>;
 
+type RecoveryServiceDeps = {
+  enqueueWakeup: RecoveryWakeup;
+  /**
+   * Returns true when the heartbeat scheduler currently cannot admit another
+   * adapter invocation for this agent.  Recovery uses this as a back-pressure
+   * check so it can remember a meaningful assignment without repeatedly
+   * enqueueing work that the scheduler will immediately skip.
+   */
+  isHeartbeatAdmissionBlocked?: (agentId: string) => Promise<boolean>;
+};
+
 type ResolvedDependencyWakeBackstopSource =
   | "issue_graph_liveness.backstop"
   | "workspace.finalize";
@@ -378,6 +389,11 @@ const NON_RETRYABLE_CONTINUATION_ERROR_CODES = new Set<string>([
 // than escalating it as stranded.
 const CONTINUATION_WAITING_ON_REVIEW_ERROR_CODE = "issue_continuation_waiting_on_review";
 const INTERACTION_CONTINUATION_REQUEUE_MAX_ATTEMPTS = 3;
+
+const HEARTBEAT_ADMISSION_SKIP_REASONS = [
+  "heartbeat.daily_run_limit",
+  "heartbeat.daily_cost_limit",
+] as const;
 
 const CONTINUATION_RECOVERY_TRANSIENT_MAX_ATTEMPTS = 3;
 const CONTINUATION_RECOVERY_DEFAULT_MAX_ATTEMPTS = 1;
@@ -778,7 +794,7 @@ function buildLivenessOriginalIssueComment(finding: IssueLivenessFinding, escala
   ].join("\n");
 }
 
-export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup }) {
+export function recoveryService(db: Db, deps: RecoveryServiceDeps) {
   const issuesSvc = issueService(db);
   const recoveryActionsSvc = issueRecoveryActionService(db);
   const treeControlSvc = issueTreeControlService(db);
@@ -1017,6 +1033,48 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       .then((rows) => Boolean(rows[0]));
   }
 
+  /**
+   * A wake can be admitted as an issue assignment, but rejected before a
+   * heartbeat run is created when the agent's daily heartbeat allowance is
+   * exhausted.  Keep that durable signal available to recovery: otherwise an
+   * issue which has already entered `in_progress` has no run, lock, or queued
+   * wake for the stranded-work scan to find.
+   *
+   * The timestamp bound is intentional.  It ties the skipped admission to the
+   * current in-progress interval instead of replaying an old cap rejection for
+   * work that was parked and later resumed by some other path.  Dependency,
+   * pause, review, and scheduling suppressions are not included here; those
+   * paths have their own durable wait/interaction semantics and must remain
+   * quiet until their explicit release condition is met.
+   */
+  async function hasRecentHeartbeatAdmissionSkip(
+    issue: typeof issues.$inferSelect,
+    agentId: string,
+  ) {
+    const startedAt = issue.startedAt ?? issue.updatedAt;
+    return db
+      .select({ id: agentWakeupRequests.id })
+      .from(agentWakeupRequests)
+      .where(
+        and(
+          eq(agentWakeupRequests.companyId, issue.companyId),
+          eq(agentWakeupRequests.agentId, agentId),
+          eq(agentWakeupRequests.status, "skipped"),
+          inArray(agentWakeupRequests.reason, [...HEARTBEAT_ADMISSION_SKIP_REASONS]),
+          gte(agentWakeupRequests.requestedAt, startedAt),
+          sql`(
+            ${agentWakeupRequests.payload} ->> 'issueId' = ${issue.id}
+            or ${agentWakeupRequests.payload} ->> 'taskId' = ${issue.id}
+            or ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'issueId' = ${issue.id}
+            or ${agentWakeupRequests.payload} -> '_paperclipWakeContext' ->> 'taskId' = ${issue.id}
+          )`,
+        ),
+      )
+      .orderBy(desc(agentWakeupRequests.requestedAt), desc(agentWakeupRequests.id))
+      .limit(1)
+      .then((rows) => Boolean(rows[0]));
+  }
+
   async function getLatestAcceptedContinuationInteraction(companyId: string, issueId: string) {
     return db
       .select({
@@ -1208,7 +1266,8 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       issueId: issue.id,
       projectId: issue.projectId,
     });
-    return Boolean(budgetBlock);
+    if (budgetBlock) return true;
+    return deps.isHeartbeatAdmissionBlocked?.(agentId) ?? false;
   }
 
   async function reconcileUnassignedBlockingIssues() {
@@ -4206,7 +4265,20 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
-      if (!latestRun && !issue.checkoutRunId && !issue.executionRunId) {
+      const replayableAdmissionSkip = !latestRun &&
+        !issue.checkoutRunId &&
+        !issue.executionRunId &&
+        issue.status === "in_progress" &&
+        await hasRecentHeartbeatAdmissionSkip(issue, agentId);
+      if (!latestRun && !issue.checkoutRunId && !issue.executionRunId && !replayableAdmissionSkip) {
+        result.skipped += 1;
+        continue;
+      }
+      // A cap-rejected assignment is remembered, but it is not retried while
+      // the same heartbeat admission limit is still active.  This keeps the
+      // recovery timer quiet and lets the next admissible pass replay the
+      // meaningful assignment exactly once.
+      if (replayableAdmissionSkip && await isInvocationBudgetBlocked(issue, agentId)) {
         result.skipped += 1;
         continue;
       }

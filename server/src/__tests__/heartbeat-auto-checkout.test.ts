@@ -35,4 +35,18 @@ describe("shouldAutoCheckoutIssueForWake", () => {
       agentId: reviewerAgentId,
     })).toBe(false);
   });
+
+  it("does not auto-checkout a manually blocked issue for a verified interaction wake", () => {
+    expect(shouldAutoCheckoutIssueForWake({
+      contextSnapshot: {
+        wakeReason: "issue_commented",
+        commentId: "comment-1",
+        dependencyBlockedInteraction: true,
+      },
+      issueStatus: "blocked",
+      issueAssigneeAgentId: "agent-1",
+      isDependencyReady: true,
+      agentId: "agent-1",
+    })).toBe(false);
+  });
 });

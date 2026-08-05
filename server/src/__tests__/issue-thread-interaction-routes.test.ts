@@ -9,6 +9,14 @@ const CREATED_AGENT_ID = "22222222-2222-4222-8222-222222222222";
 const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
   listReviewAttention: vi.fn(),
+  getDependencyReadiness: vi.fn(async () => ({
+    issueId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    blockerIssueIds: [],
+    unresolvedBlockerIssueIds: [],
+    unresolvedBlockerCount: 0,
+    allBlockersDone: true,
+    isDependencyReady: true,
+  })),
 }));
 
 const mockInteractionService = vi.hoisted(() => ({
@@ -564,7 +572,14 @@ describe.sequential("issue thread interaction routes", () => {
           issueId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           interactionId: "interaction-addressed",
         }),
-        contextSnapshot: expect.objectContaining({ wakeReason: "interaction_pending" }),
+        contextSnapshot: expect.objectContaining({
+          wakeReason: "interaction_pending",
+          source: "issue.interaction.created",
+          interactionId: "interaction-addressed",
+          interactionKind: "ask_user_questions",
+          interactionStatus: "pending",
+          interactionTargetAgentId: ASSIGNEE_AGENT_ID,
+        }),
       }),
     );
   });
@@ -617,8 +632,7 @@ describe.sequential("issue thread interaction routes", () => {
       expect.objectContaining({ userId: "local-board" }),
     );
     expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(2);
-    expect(mockHeartbeatService.wakeup).toHaveBeenNthCalledWith(
-      1,
+    expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
       CREATED_AGENT_ID,
       expect.objectContaining({
         source: "assignment",
@@ -629,8 +643,7 @@ describe.sequential("issue thread interaction routes", () => {
         }),
       }),
     );
-    expect(mockHeartbeatService.wakeup).toHaveBeenNthCalledWith(
-      2,
+    expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
       ASSIGNEE_AGENT_ID,
       expect.objectContaining({
         source: "automation",

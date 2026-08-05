@@ -7,6 +7,7 @@ import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNull, lt, lte,
 import type { Db } from "@paperclipai/db";
 import {
   AGENT_DEFAULT_MAX_CONCURRENT_RUNS,
+  ISSUE_THREAD_INTERACTION_KINDS,
   ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY,
   MODEL_PROFILE_KEYS,
   PROVIDER_QUOTA_MONITOR_SERVICE_NAME,
@@ -94,7 +95,7 @@ import type {
   UsageSummary,
 } from "../adapters/index.js";
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
-import { parseObject, asBoolean, asNumber, appendWithByteCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
+import { parseObject, asBoolean, asNumber, asStringArray, appendWithByteCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { costService } from "./costs.js";
 import { trackAgentFirstHeartbeat } from "@paperclipai/shared/telemetry";
 import { getTelemetryClient } from "../telemetry.js";
@@ -410,6 +411,7 @@ const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_CAUSE = "execution_review_participan
 const GITHUB_PR_WORKFLOW_SKILL_KEY = "paperclipai/bundled/software-development/github-pr-workflow";
 const GITHUB_PR_WORKFLOW_SKILL_SLUG = "github-pr-workflow";
 const PUSH_CAPABILITY_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN"] as const;
+const ISSUE_INTERACTION_WAKE_KINDS = new Set<string>(ISSUE_THREAD_INTERACTION_KINDS);
 // Local adapters that must remain bound to a resolved project/session workspace when
 // an issue explicitly names one.  Workspace binding and Git metadata are separate
 // capabilities: an adapter can safely work in a non-Git project workspace while still
@@ -2024,12 +2026,21 @@ export async function assertGitSensitiveAdapterWorkspaceValid(input: {
   executionWorkspace: RealizedExecutionWorkspace;
   persistedExecutionWorkspace: ExecutionWorkspace | null;
   executionTarget: unknown;
+  resolvedAdapterConfig?: Record<string, unknown> | null;
   environmentDriver?: string | null;
   leaseMetadata?: unknown;
 }) {
   const workspaceBindingRequired = PROJECT_WORKSPACE_BOUND_LOCAL_ADAPTER_TYPES.has(input.adapterType);
   if (!workspaceBindingRequired) return;
-  const gitMetadataRequired = GIT_SENSITIVE_LOCAL_ADAPTER_TYPES.has(input.adapterType);
+  // Codex supports an explicit non-Git mode for project workspaces. Keep the
+  // opt-in narrow and adapter-owned: a caller must provide the exact CLI flag
+  // in the resolved adapter `extraArgs`; generic `args` or a workspace hint
+  // must not disable this preflight. All other Git-sensitive adapters retain
+  // the existing metadata requirement.
+  const allowNonGitWorkspace =
+    input.adapterType === "codex_local" &&
+    asStringArray(input.resolvedAdapterConfig?.extraArgs).includes("--skip-git-repo-check");
+  const gitMetadataRequired = GIT_SENSITIVE_LOCAL_ADAPTER_TYPES.has(input.adapterType) && !allowNonGitWorkspace;
 
   const executionTargetKind = readNonEmptyString((input.executionTarget as { kind?: unknown } | null)?.kind) ?? "local";
   if (executionTargetKind !== "local") return;
@@ -4099,10 +4110,76 @@ function shouldRequireIssueCommentForWake(
 
 function allowsIssueInteractionWake(
   contextSnapshot: Record<string, unknown> | null | undefined,
+  agentId?: string | null,
 ) {
   const wakeReason = readNonEmptyString(contextSnapshot?.wakeReason);
+  if (wakeReason === "interaction_pending") {
+    // A pending interaction wake is created only by the issue-interaction
+    // route. It intentionally targets a reviewer/resolver who may not own the
+    // issue, so it must survive assignee and dependency checks. Keep this
+    // branch strict: ordinary callers cannot opt into it with only the reason
+    // string or an arbitrary payload.
+    const source = readNonEmptyString(contextSnapshot?.source);
+    const wakeSource = readNonEmptyString(contextSnapshot?.wakeSource);
+    const wakeTriggerDetail = readNonEmptyString(contextSnapshot?.wakeTriggerDetail);
+    const interactionId = readNonEmptyString(contextSnapshot?.interactionId);
+    const interactionTargetAgentId = readNonEmptyString(contextSnapshot?.interactionTargetAgentId);
+    const interactionKind = readNonEmptyString(contextSnapshot?.interactionKind);
+    const interactionStatus = readNonEmptyString(contextSnapshot?.interactionStatus);
+    const validInteractionKind = ISSUE_INTERACTION_WAKE_KINDS.has(interactionKind ?? "");
+    return source === "issue.interaction.created" &&
+      wakeSource === "automation" &&
+      wakeTriggerDetail === "system" &&
+      interactionStatus === "pending" &&
+      isUuidLike(interactionId) &&
+      isUuidLike(interactionTargetAgentId) &&
+      validInteractionKind &&
+      (!agentId || interactionTargetAgentId === agentId);
+  }
   if (!wakeReason || !ISSUE_TREE_CONTROL_INTERACTION_WAKE_REASONS.has(wakeReason)) return false;
   return Boolean(deriveCommentId(contextSnapshot, null));
+}
+
+async function allowsVerifiedIssueInteractionWake(
+  dbOrTx: Pick<Db, "select">,
+  input: {
+    companyId: string;
+    issueId: string;
+    agentId: string;
+    contextSnapshot: Record<string, unknown> | null | undefined;
+  },
+) {
+  if (!allowsIssueInteractionWake(input.contextSnapshot, input.agentId)) return false;
+
+  const wakeReason = readNonEmptyString(input.contextSnapshot?.wakeReason);
+  if (wakeReason !== "interaction_pending") return true;
+
+  const interactionId = readNonEmptyString(input.contextSnapshot?.interactionId);
+  const interactionKind = readNonEmptyString(input.contextSnapshot?.interactionKind);
+  if (!interactionId || !interactionKind) return false;
+
+  // The context shape is deliberately not sufficient on its own. Confirm the
+  // interaction still exists for this tenant/issue, is pending, is addressed
+  // to the queued agent, and has the same kind. This prevents a manually
+  // crafted wake or stale context from bypassing dependency/assignee checks.
+  const interaction = await dbOrTx
+    .select({
+      id: issueThreadInteractions.id,
+      kind: issueThreadInteractions.kind,
+      status: issueThreadInteractions.status,
+      addresseeAgentId: issueThreadInteractions.addresseeAgentId,
+    })
+    .from(issueThreadInteractions)
+    .where(and(
+      eq(issueThreadInteractions.companyId, input.companyId),
+      eq(issueThreadInteractions.issueId, input.issueId),
+      eq(issueThreadInteractions.id, interactionId),
+    ))
+    .then((rows) => rows[0] ?? null);
+
+  return interaction?.status === "pending" &&
+    interaction.addresseeAgentId === input.agentId &&
+    interaction.kind === interactionKind;
 }
 
 async function listUnresolvedBlockerSummaries(
@@ -5206,6 +5283,16 @@ export function shouldAutoCheckoutIssueForWake(input: {
   agentId: string;
 }) {
   if (input.issueAssigneeAgentId !== input.agentId) return false;
+  // A verified interaction wake on manually blocked work is for answering or
+  // triaging the human's question.  The same marker is also carried by
+  // dependency-blocked interaction wakes, but dependency readiness already
+  // prevents checkout for those rows.  Scope this marker check to a still
+  // manually-blocked row so a coalesced marker cannot suppress a later wake
+  // after the dependency hold has been cleared.
+  if (
+    input.issueStatus === "blocked" &&
+    input.contextSnapshot?.dependencyBlockedInteraction === true
+  ) return false;
   if (!input.isDependencyReady) return false;
   const executionState = parseIssueExecutionState(input.issueExecutionState);
   if (executionState?.status === "pending") return false;
@@ -6667,7 +6754,14 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     cancelWorkForScope: cancelBudgetScopeWork,
   };
   const budgets = budgetService(db, budgetHooks);
-  const recovery = recoveryService(db, { enqueueWakeup });
+  const recovery = recoveryService(db, {
+    enqueueWakeup,
+    isHeartbeatAdmissionBlocked: async (agentId) => {
+      const agent = await getAgent(agentId);
+      if (!agent) return true;
+      return Boolean(await getHeartbeatDailyCapBlock(agent, parseHeartbeatPolicy(agent)));
+    },
+  });
 
   function isPlanApprovalConfirmationPayload(payload: unknown) {
     const target = parseObject(parseObject(payload).target);
@@ -12395,7 +12489,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       const dependencyReadiness = await issuesSvc.listDependencyReadiness(run.companyId, [issueId]);
       const readiness = dependencyReadiness.get(issueId);
       const unresolvedBlockerCount = readiness?.unresolvedBlockerCount ?? 0;
-      if (unresolvedBlockerCount > 0 && !allowsIssueInteractionWake(context)) {
+      const verifiedInteractionWake = await allowsVerifiedIssueInteractionWake(db, {
+        companyId: run.companyId,
+        issueId,
+        agentId: run.agentId,
+        contextSnapshot: context,
+      });
+      if (unresolvedBlockerCount > 0 && !verifiedInteractionWake) {
         await cancelQueuedRunForBlockedDependencies(run, issueId, readiness?.unresolvedBlockerIssueIds ?? []);
         logger.info({ runId: run.id, issueId, unresolvedBlockerCount }, "claimQueuedRun: cancelled blocked queued run");
         return null;
@@ -12582,7 +12682,12 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     }
 
     const wakeCommentId = deriveCommentId(context, null);
-    const isInteractionWake = allowsIssueInteractionWake(context);
+    const isInteractionWake = await allowsVerifiedIssueInteractionWake(db, {
+      companyId: run.companyId,
+      issueId,
+      agentId: run.agentId,
+      contextSnapshot: context,
+    });
     const resumeIntent = context.resumeIntent === true || context.followUpRequested === true;
     const wakeReason = readNonEmptyString(context.wakeReason);
     const retryReason = readNonEmptyString(context.retryReason) ?? run.scheduledRetryReason ?? null;
@@ -15164,6 +15269,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         executionWorkspace,
         persistedExecutionWorkspace,
         executionTarget,
+        resolvedAdapterConfig: runtimeConfig,
         environmentDriver: selectedEnvironment.driver,
         leaseMetadata: activeEnvironmentLease.lease.metadata,
       });
@@ -17684,21 +17790,33 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         // Blocked descendants should stay idle until the final blocker resolves.
         // Human comment/mention wakes are the exception: they may run in a
         // bounded interaction mode so the assignee can answer or triage.
-        const blockedInteractionWake =
-          dependencyReadiness &&
-          !dependencyReadiness.isDependencyReady &&
-          allowsIssueInteractionWake(enrichedContextSnapshot);
+        const verifiedInteractionWake = await allowsVerifiedIssueInteractionWake(tx, {
+          companyId: issue.companyId,
+          issueId: issue.id,
+          agentId,
+          contextSnapshot: enrichedContextSnapshot,
+        });
+        // Preserve the existing bounded interaction path for dependency-held
+        // issues even when their status has not yet been normalized to
+        // `blocked`; manually blocked issues with no dependency relations use
+        // the same marker to prevent an interaction wake from becoming work.
+        const blockedInteractionWake = verifiedInteractionWake && (
+          issue.status === "blocked" ||
+          Boolean(dependencyReadiness && !dependencyReadiness.isDependencyReady)
+        );
 
         if (blockedInteractionWake) {
           enrichedContextSnapshot.dependencyBlockedInteraction = true;
-          enrichedContextSnapshot.unresolvedBlockerIssueIds = dependencyReadiness.unresolvedBlockerIssueIds;
-          enrichedContextSnapshot.unresolvedBlockerCount = dependencyReadiness.unresolvedBlockerCount;
-          enrichedContextSnapshot.unresolvedBlockerSummaries = await listUnresolvedBlockerSummaries(
-            tx,
-            issue.companyId,
-            issue.id,
-            dependencyReadiness.unresolvedBlockerIssueIds,
-          );
+          if (dependencyReadiness && !dependencyReadiness.isDependencyReady) {
+            enrichedContextSnapshot.unresolvedBlockerIssueIds = dependencyReadiness.unresolvedBlockerIssueIds;
+            enrichedContextSnapshot.unresolvedBlockerCount = dependencyReadiness.unresolvedBlockerCount;
+            enrichedContextSnapshot.unresolvedBlockerSummaries = await listUnresolvedBlockerSummaries(
+              tx,
+              issue.companyId,
+              issue.id,
+              dependencyReadiness.unresolvedBlockerIssueIds,
+            );
+          }
         }
 
         if (!activeExecutionRun && dependencyReadiness && !dependencyReadiness.isDependencyReady && !blockedInteractionWake) {

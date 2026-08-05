@@ -1809,21 +1809,38 @@ type CommentWakeDependencyReadiness = {
 };
 
 /**
- * Ordinary board comments are a nudge for work that is ready to run, not a
- * way to bypass the board's dependency and backlog semantics.  Explicit
- * mentions, reopen/resume requests, decision continuations, and the separate
+ * Ordinary board comments are a nudge for work that is ready to run.  A
+ * comment on blocked work is also allowed to wake the assignee for a reply
+ * or triage, but it must not bypass the dependency hold or change the issue's
+ * status.  Backlog comments remain planning notes.  Explicit mentions,
+ * reopen/resume requests, decision continuations, and the separate
  * blockers-resolved path are handled by their own wake paths and do not use
  * this predicate.
  */
 async function canWakeAssigneeForOrdinaryComment(input: {
   issueId: string;
   status: string;
+  /**
+   * A human comment on blocked work is an interaction request, not a request
+   * to bypass the dependency hold.  Allow the assignee to wake and respond
+   * while leaving the issue blocked.  Assignment-created wakes intentionally
+   * leave this disabled so assigning blocked work cannot start execution.
+   */
+  allowBlockedInteraction?: boolean;
   getDependencyReadiness?: (issueId: string) => Promise<CommentWakeDependencyReadiness>;
 }) {
-  if (input.status === "backlog" || input.status === "blocked") return false;
+  if (input.status === "backlog") return false;
+  if (input.status === "blocked" && input.allowBlockedInteraction !== true) return false;
   if (!input.getDependencyReadiness) return false;
   try {
     const readiness = await input.getDependencyReadiness(input.issueId);
+    if (input.status === "blocked") {
+      // A blocked comment is a bounded interaction/triage wake.  Dependency
+      // readiness is still required so an unreadable dependency graph cannot
+      // trigger work, but the unresolved count intentionally does not gate a
+      // reply to the human.
+      return readiness !== null && typeof readiness === "object";
+    }
     return readiness.unresolvedBlockerCount === 0;
   } catch (err) {
     logger.warn({ err, issueId: input.issueId }, "failed to check dependencies before issue comment wake");
@@ -9544,6 +9561,7 @@ export function issueRoutes(
           ? await canWakeAssigneeForOrdinaryComment({
               issueId: issue.id,
               status: issue.status,
+              allowBlockedInteraction: actor.actorType === "user" && actor.runId == null,
               getDependencyReadiness: dependencyReadinessSvc.getDependencyReadiness,
             })
           : false;
@@ -10144,6 +10162,8 @@ export function issueRoutes(
           taskId: issue.id,
           interactionId: interaction.id,
           interactionKind: interaction.kind,
+          interactionStatus: interaction.status,
+          interactionTargetAgentId: interaction.addresseeAgentId,
           sourceCommentId: interaction.sourceCommentId ?? null,
           sourceRunId: interaction.sourceRunId ?? null,
           wakeReason: "interaction_pending",
@@ -11354,6 +11374,7 @@ export function issueRoutes(
         ? await canWakeAssigneeForOrdinaryComment({
             issueId: currentIssue.id,
             status: currentIssue.status,
+            allowBlockedInteraction: actor.actorType === "user" && actor.runId == null,
             getDependencyReadiness: svc.getDependencyReadiness,
           })
         : false;

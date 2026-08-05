@@ -441,6 +441,58 @@ describe("assertGitSensitiveAdapterWorkspaceValid", () => {
     );
   });
 
+  it("allows codex_local to use a non-Git project workspace only with the explicit CLI opt-in", async () => {
+    const input = buildWorkspaceValidationInput();
+    const cwd = "/tmp/paperclip-codex-non-git-project";
+
+    await expect(
+      assertGitSensitiveAdapterWorkspaceValid(
+        buildWorkspaceValidationInput({
+          resolvedWorkspace: buildResolvedWorkspace({ cwd }),
+          executionWorkspace: {
+            ...input.executionWorkspace,
+            baseCwd: cwd,
+            cwd,
+          },
+          persistedExecutionWorkspace: {
+            ...input.persistedExecutionWorkspace!,
+            cwd,
+            providerType: "local_fs",
+          },
+          resolvedAdapterConfig: {
+            extraArgs: ["--dangerously-bypass-hook-trust", "--skip-git-repo-check"],
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not treat a generic args field as the codex non-Git opt-in", async () => {
+    const input = buildWorkspaceValidationInput();
+    const cwd = "/tmp/paperclip-codex-non-git-project-generic-args";
+
+    await expectWorkspaceValidationFailure(
+      buildWorkspaceValidationInput({
+        resolvedWorkspace: buildResolvedWorkspace({ cwd }),
+        executionWorkspace: {
+          ...input.executionWorkspace,
+          baseCwd: cwd,
+          cwd,
+        },
+        persistedExecutionWorkspace: {
+          ...input.persistedExecutionWorkspace!,
+          cwd,
+          providerType: "local_fs",
+        },
+        resolvedAdapterConfig: {
+          args: ["--skip-git-repo-check"],
+        },
+      }),
+      "missing_git_metadata",
+      "has no .git metadata",
+    );
+  });
+
   it("allows OpenCode to use a non-Git project workspace while retaining workspace binding", async () => {
     const input = buildWorkspaceValidationInput({
       adapterType: "opencode_local",
