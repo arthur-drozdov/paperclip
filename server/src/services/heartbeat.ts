@@ -95,7 +95,7 @@ import type {
   UsageSummary,
 } from "../adapters/index.js";
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
-import { parseObject, asBoolean, asNumber, asStringArray, appendWithByteCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
+import { parseObject, asBoolean, asNumber, appendWithByteCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { costService } from "./costs.js";
 import { trackAgentFirstHeartbeat } from "@paperclipai/shared/telemetry";
 import { getTelemetryClient } from "../telemetry.js";
@@ -2013,6 +2013,47 @@ export async function assertPushCapabilityCheckoutValid(input: {
   );
 }
 
+/**
+ * A project workspace without a repository URL/ref is an intentional
+ * file-backed Paperclip workspace, not a broken checkout. Codex still needs
+ * its CLI repository guard disabled for that workspace, while an explicit
+ * worktree/repository signal must continue to require real Git metadata.
+ */
+export function isDeclaredNonGitCodexWorkspace(input: {
+  adapterType: string;
+  resolvedWorkspace: Pick<ResolvedWorkspaceForRun, "source" | "projectId" | "workspaceId" | "repoUrl" | "repoRef">;
+  executionWorkspace: Pick<RealizedExecutionWorkspace, "source" | "projectId" | "workspaceId" | "strategy" | "repoUrl" | "repoRef" | "branchName" | "worktreePath">;
+  persistedExecutionWorkspace: Pick<ExecutionWorkspace, "projectId" | "projectWorkspaceId" | "strategyType" | "providerType" | "repoUrl" | "baseRef" | "branchName" | "providerRef"> | null;
+}) {
+  if (input.adapterType !== "codex_local") return false;
+  if (input.resolvedWorkspace.source === "agent_home" || input.executionWorkspace.source === "agent_home") {
+    return false;
+  }
+  const projectBoundWorkspace =
+    input.resolvedWorkspace.source === "project_primary" ||
+    input.executionWorkspace.source === "project_primary" ||
+    (input.resolvedWorkspace.source === "task_session" &&
+      (Boolean(input.resolvedWorkspace.workspaceId) ||
+        Boolean(input.executionWorkspace.workspaceId) ||
+        Boolean(input.persistedExecutionWorkspace?.projectWorkspaceId)));
+  if (!projectBoundWorkspace) return false;
+  const explicitGitWorkspace =
+    input.executionWorkspace.strategy === "git_worktree" ||
+    input.persistedExecutionWorkspace?.strategyType === "git_worktree" ||
+    input.persistedExecutionWorkspace?.providerType === "git_worktree" ||
+    Boolean(readNonEmptyString(input.executionWorkspace.repoUrl)) ||
+    Boolean(readNonEmptyString(input.executionWorkspace.repoRef)) ||
+    Boolean(readNonEmptyString(input.executionWorkspace.branchName)) ||
+    Boolean(readNonEmptyString(input.executionWorkspace.worktreePath)) ||
+    Boolean(readNonEmptyString(input.resolvedWorkspace.repoUrl)) ||
+    Boolean(readNonEmptyString(input.resolvedWorkspace.repoRef)) ||
+    Boolean(readNonEmptyString(input.persistedExecutionWorkspace?.repoUrl)) ||
+    Boolean(readNonEmptyString(input.persistedExecutionWorkspace?.baseRef)) ||
+    Boolean(readNonEmptyString(input.persistedExecutionWorkspace?.branchName)) ||
+    Boolean(readNonEmptyString(input.persistedExecutionWorkspace?.providerRef));
+  return !explicitGitWorkspace;
+}
+
 export async function assertGitSensitiveAdapterWorkspaceValid(input: {
   adapterType: string;
   agentId: string;
@@ -2026,20 +2067,12 @@ export async function assertGitSensitiveAdapterWorkspaceValid(input: {
   executionWorkspace: RealizedExecutionWorkspace;
   persistedExecutionWorkspace: ExecutionWorkspace | null;
   executionTarget: unknown;
-  resolvedAdapterConfig?: Record<string, unknown> | null;
   environmentDriver?: string | null;
   leaseMetadata?: unknown;
 }) {
   const workspaceBindingRequired = PROJECT_WORKSPACE_BOUND_LOCAL_ADAPTER_TYPES.has(input.adapterType);
   if (!workspaceBindingRequired) return;
-  // Codex supports an explicit non-Git mode for project workspaces. Keep the
-  // opt-in narrow and adapter-owned: a caller must provide the exact CLI flag
-  // in the resolved adapter `extraArgs`; generic `args` or a workspace hint
-  // must not disable this preflight. All other Git-sensitive adapters retain
-  // the existing metadata requirement.
-  const allowNonGitWorkspace =
-    input.adapterType === "codex_local" &&
-    asStringArray(input.resolvedAdapterConfig?.extraArgs).includes("--skip-git-repo-check");
+  const allowNonGitWorkspace = isDeclaredNonGitCodexWorkspace(input);
   const gitMetadataRequired = GIT_SENSITIVE_LOCAL_ADAPTER_TYPES.has(input.adapterType) && !allowNonGitWorkspace;
 
   const executionTargetKind = readNonEmptyString((input.executionTarget as { kind?: unknown } | null)?.kind) ?? "local";
@@ -15274,7 +15307,6 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         executionWorkspace,
         persistedExecutionWorkspace,
         executionTarget,
-        resolvedAdapterConfig: runtimeConfig,
         environmentDriver: selectedEnvironment.driver,
         leaseMetadata: activeEnvironmentLease.lease.metadata,
       });

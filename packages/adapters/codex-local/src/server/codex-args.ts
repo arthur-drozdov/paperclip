@@ -7,6 +7,38 @@ import {
 
 const SKIP_GIT_REPO_CHECK_FLAG = "--skip-git-repo-check";
 
+/**
+ * Paperclip may intentionally provision a file-backed workspace without a
+ * repository. Codex's CLI checks the current directory for Git metadata even
+ * for those workspaces, so the adapter needs to opt out of that check. Keep
+ * the predicate conservative: any explicit repository/worktree signal means
+ * the workspace is Git-backed and must retain Codex's normal validation.
+ */
+export function isNonGitPaperclipWorkspace(input: {
+  source?: string;
+  projectId?: string;
+  workspaceId?: string;
+  strategy?: string;
+  repoUrl?: string;
+  repoRef?: string;
+  branchName?: string;
+  worktreePath?: string;
+}): boolean {
+  const source = input.source?.trim();
+  if (source !== "project_primary" && source !== "task_session") return false;
+  // A task session is only project-bound when Paperclip attests the workspace
+  // identity. A project id alone can come from an arbitrary prior-session cwd,
+  // so an unscoped task session must retain Codex's normal repository check.
+  if (source === "task_session" && !input.workspaceId?.trim()) return false;
+  const explicitGitWorkspace =
+    input.strategy === "git_worktree" ||
+    Boolean(input.repoUrl?.trim()) ||
+    Boolean(input.repoRef?.trim()) ||
+    Boolean(input.branchName?.trim()) ||
+    Boolean(input.worktreePath?.trim());
+  return !explicitGitWorkspace;
+}
+
 export type BuildCodexExecArgsResult = {
   args: string[];
   model: string;

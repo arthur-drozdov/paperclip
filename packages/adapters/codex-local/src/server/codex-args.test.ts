@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexExecArgs } from "./codex-args.js";
+import { buildCodexExecArgs, isNonGitPaperclipWorkspace } from "./codex-args.js";
 
 describe("buildCodexExecArgs", () => {
   it("rewrites the legacy bare gpt-5.6 alias to gpt-5.6-sol and applies fast mode", () => {
@@ -196,5 +196,97 @@ describe("buildCodexExecArgs", () => {
     });
 
     expect(result.args.filter((arg) => arg === "--skip-git-repo-check")).toHaveLength(1);
+  });
+});
+
+describe("isNonGitPaperclipWorkspace", () => {
+  it("recognizes a declared file-backed Paperclip workspace without agent configuration", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "project_primary",
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps an explicit repository workspace on Codex's normal Git validation path", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "project_primary",
+        strategy: "project_primary",
+        repoUrl: "https://github.com/example/repo.git",
+        repoRef: "main",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a worktree workspace on Codex's normal Git validation path", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "project_primary",
+        strategy: "git_worktree",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not infer a Paperclip workspace from an unscoped adapter invocation", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not bypass Git validation for an agent-home workspace", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "agent_home",
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not bypass Git validation for an unidentified task session", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "task_session",
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows an explicitly project-bound task session without repository metadata", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "task_session",
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat a task-session project id alone as project-bound", () => {
+    expect(
+      isNonGitPaperclipWorkspace({
+        source: "task_session",
+        projectId: "project-1",
+        strategy: "project_primary",
+        repoUrl: "",
+        repoRef: "",
+      }),
+    ).toBe(false);
   });
 });

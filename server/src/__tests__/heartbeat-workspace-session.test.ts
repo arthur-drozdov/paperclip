@@ -10,6 +10,7 @@ import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import {
   applyPersistedExecutionWorkspaceConfig,
   assertGitSensitiveAdapterWorkspaceValid,
+  isDeclaredNonGitCodexWorkspace,
   assertGitWorktreeBaseWorkspaceReady,
   assertPushCapabilityCheckoutValid,
   buildExplicitResumeSessionOverride,
@@ -425,15 +426,24 @@ describe("assertGitSensitiveAdapterWorkspaceValid", () => {
 
     await expectWorkspaceValidationFailure(
       buildWorkspaceValidationInput({
-        resolvedWorkspace: buildResolvedWorkspace({ cwd }),
+        resolvedWorkspace: buildResolvedWorkspace({
+          cwd,
+          repoUrl: "https://github.com/example/repo.git",
+          repoRef: "main",
+        }),
         executionWorkspace: {
           ...input.executionWorkspace,
           baseCwd: cwd,
           cwd,
+          repoUrl: "https://github.com/example/repo.git",
+          repoRef: "main",
         },
         persistedExecutionWorkspace: {
           ...input.persistedExecutionWorkspace!,
           cwd,
+          repoUrl: "https://github.com/example/repo.git",
+          baseRef: "main",
+          providerType: "local_fs",
         },
       }),
       "missing_git_metadata",
@@ -441,7 +451,7 @@ describe("assertGitSensitiveAdapterWorkspaceValid", () => {
     );
   });
 
-  it("allows codex_local to use a non-Git project workspace only with the explicit CLI opt-in", async () => {
+  it("allows codex_local to use a declared non-Git project workspace without per-agent config", async () => {
     const input = buildWorkspaceValidationInput();
     const cwd = "/tmp/paperclip-codex-non-git-project";
 
@@ -459,38 +469,32 @@ describe("assertGitSensitiveAdapterWorkspaceValid", () => {
             cwd,
             providerType: "local_fs",
           },
-          resolvedAdapterConfig: {
-            extraArgs: ["--dangerously-bypass-hook-trust", "--skip-git-repo-check"],
-          },
         }),
       ),
     ).resolves.toBeUndefined();
   });
 
-  it("does not treat a generic args field as the codex non-Git opt-in", async () => {
-    const input = buildWorkspaceValidationInput();
-    const cwd = "/tmp/paperclip-codex-non-git-project-generic-args";
-
-    await expectWorkspaceValidationFailure(
-      buildWorkspaceValidationInput({
-        resolvedWorkspace: buildResolvedWorkspace({ cwd }),
-        executionWorkspace: {
-          ...input.executionWorkspace,
-          baseCwd: cwd,
-          cwd,
-        },
-        persistedExecutionWorkspace: {
-          ...input.persistedExecutionWorkspace!,
-          cwd,
-          providerType: "local_fs",
-        },
-        resolvedAdapterConfig: {
-          args: ["--skip-git-repo-check"],
-        },
+  it("does not treat a task-session project id alone as a project-bound non-Git workspace", () => {
+    const input = buildWorkspaceValidationInput({
+      resolvedWorkspace: buildResolvedWorkspace({
+        source: "task_session",
+        projectId: "project-1",
+        workspaceId: null,
       }),
-      "missing_git_metadata",
-      "has no .git metadata",
-    );
+      executionWorkspace: {
+        ...buildWorkspaceValidationInput().executionWorkspace,
+        source: "task_session",
+        projectId: "project-1",
+        workspaceId: null,
+      },
+      persistedExecutionWorkspace: {
+        ...buildWorkspaceValidationInput().persistedExecutionWorkspace!,
+        projectId: "project-1",
+        projectWorkspaceId: null,
+      },
+    });
+
+    expect(isDeclaredNonGitCodexWorkspace(input)).toBe(false);
   });
 
   it("allows OpenCode to use a non-Git project workspace while retaining workspace binding", async () => {

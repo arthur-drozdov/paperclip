@@ -391,6 +391,7 @@ describe("codex remote execution", () => {
     expect(call?.[2]).toEqual([
       "exec",
       "--json",
+      "--skip-git-repo-check",
       "-",
     ]);
   });
@@ -462,6 +463,7 @@ describe("codex remote execution", () => {
     expect(call?.[2]).toEqual([
       "exec",
       "--json",
+      "--skip-git-repo-check",
       "resume",
       "session-123",
       "-",
@@ -541,6 +543,7 @@ describe("codex remote execution", () => {
     expect(call?.[2]).toEqual([
       "exec",
       "--json",
+      "--skip-git-repo-check",
       "resume",
       "session-123",
       "-",
@@ -616,5 +619,84 @@ describe("codex remote execution", () => {
     expect(call?.[3].env.PAPERCLIP_WORKSPACE_AUTHORITATIVE_ROOT).toBe("/app");
     expect(call?.[3].env.CODEX_HOME).toBe("/app/.paperclip-runtime/codex/home");
     expect(call?.[3].remoteExecution?.remoteCwd).toBe("/app");
+  });
+
+  it("adds the Git-check bypass for a local project-bound non-Git workspace", async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-codex-local-non-git-"));
+    cleanupDirs.push(rootDir);
+    const workspaceDir = path.join(rootDir, "workspace");
+    const codexHomeDir = path.join(rootDir, "codex-home");
+    await mkdir(workspaceDir, { recursive: true });
+    await mkdir(codexHomeDir, { recursive: true });
+    await writeFile(path.join(codexHomeDir, "auth.json"), "{}", "utf8");
+
+    await execute({
+      runId: "run-local-non-git",
+      agent: {
+        id: "agent-1",
+        companyId: "company-1",
+        name: "CodexCoder",
+        adapterType: "codex_local",
+        adapterConfig: {},
+      },
+      runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+      config: {
+        command: "codex",
+        engine: "cli",
+        env: { CODEX_HOME: codexHomeDir, OPENAI_API_KEY: "test-key" },
+      },
+      context: {
+        paperclipWorkspace: {
+          cwd: workspaceDir,
+          source: "project_primary",
+          projectId: "project-1",
+          workspaceId: "workspace-1",
+        },
+      },
+      onLog: async () => {},
+    });
+
+    const call = runChildProcess.mock.calls[0] as unknown as [string, string, string[]] | undefined;
+    expect(call?.[2]).toContain("--skip-git-repo-check");
+  });
+
+  it.each([
+    { source: "agent_home", label: "agent-home" },
+    { source: "task_session", label: "unidentified task session" },
+  ])("does not bypass Git validation for a $label workspace", async ({ source }) => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-codex-local-unscoped-"));
+    cleanupDirs.push(rootDir);
+    const workspaceDir = path.join(rootDir, "workspace");
+    const codexHomeDir = path.join(rootDir, "codex-home");
+    await mkdir(workspaceDir, { recursive: true });
+    await mkdir(codexHomeDir, { recursive: true });
+    await writeFile(path.join(codexHomeDir, "auth.json"), "{}", "utf8");
+
+    await execute({
+      runId: `run-local-${source}`,
+      agent: {
+        id: "agent-1",
+        companyId: "company-1",
+        name: "CodexCoder",
+        adapterType: "codex_local",
+        adapterConfig: {},
+      },
+      runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+      config: {
+        command: "codex",
+        engine: "cli",
+        env: { CODEX_HOME: codexHomeDir, OPENAI_API_KEY: "test-key" },
+      },
+      context: {
+        paperclipWorkspace: {
+          cwd: workspaceDir,
+          source,
+        },
+      },
+      onLog: async () => {},
+    });
+
+    const call = runChildProcess.mock.calls[0] as unknown as [string, string, string[]] | undefined;
+    expect(call?.[2]).not.toContain("--skip-git-repo-check");
   });
 });

@@ -86,7 +86,7 @@ import {
 } from "./auth-precedence.js";
 import { prepareCodexRuntimeConfig } from "./runtime-config.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
-import { buildCodexExecArgs } from "./codex-args.js";
+import { buildCodexExecArgs, isNonGitPaperclipWorkspace } from "./codex-args.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import {
   CODEX_OUTPUT_INACTIVITY_MONITOR_SIGTERM_GRACE_MS,
@@ -541,6 +541,8 @@ export async function ensureCodexSkillsInjected(
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const engineSelection = await resolveCodexExecutionEngineForRun(ctx);
   if (engineSelection.engine === "acp") {
+    // ACP does not invoke `codex exec`, so the CLI Git-repository guard below
+    // is not applicable; no separate ACP bypass is needed here.
     try {
       return await executeCodexAcp(ctx);
     } catch (err) {
@@ -569,6 +571,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const workspaceCwd = asString(workspaceContext.cwd, "");
   const workspaceSource = asString(workspaceContext.source, "");
   const workspaceStrategy = asString(workspaceContext.strategy, "");
+  const workspaceProjectId = asString(workspaceContext.projectId, "");
   const workspaceId = asString(workspaceContext.workspaceId, "");
   const workspaceRepoUrl = asString(workspaceContext.repoUrl, "");
   const workspaceRepoRef = asString(workspaceContext.repoRef, "");
@@ -823,6 +826,24 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const runtimeExecutionTarget = overrideAdapterExecutionTargetRemoteCwd(executionTarget, effectiveExecutionCwd);
     const executionTargetIsSandbox =
       runtimeExecutionTarget?.kind === "remote" && runtimeExecutionTarget.transport === "sandbox";
+    const declaredNonGitPaperclipWorkspace = isNonGitPaperclipWorkspace({
+      source: workspaceSource,
+      projectId: workspaceProjectId,
+      workspaceId,
+      strategy: workspaceStrategy,
+      repoUrl: workspaceRepoUrl,
+      repoRef: workspaceRepoRef,
+      branchName: workspaceBranch,
+      worktreePath: workspaceWorktreePath,
+    });
+    // A remote workspace's local cwd is only a staging directory, so the
+    // declaration is authoritative there. For a local run, preserve Codex's
+    // normal repository trust check when the workspace happens to contain Git
+    // metadata despite having no repository fields in the Paperclip context.
+    const nonGitPaperclipWorkspaceNeedsBypass =
+      declaredNonGitPaperclipWorkspace &&
+      (executionTargetIsRemote || !(await pathExists(path.join(cwd, ".git"))));
+    const skipGitRepoCheck = executionTargetIsSandbox || nonGitPaperclipWorkspaceNeedsBypass;
     const restoreRemoteWorkspace = preparedExecutionTargetRuntime
       ? () => preparedExecutionTargetRuntime.restoreWorkspace((line) => onLog("stdout", line))
       : null;
@@ -1140,6 +1161,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       commandNotes.push(
         "Added --skip-git-repo-check for sandbox execution because Codex requires an explicit trust bypass in headless remote workspaces.",
       );
+    } else if (nonGitPaperclipWorkspaceNeedsBypass) {
+      commandNotes.push(
+        "Added --skip-git-repo-check because this Paperclip workspace has no repository metadata.",
+      );
     }
     if (preparedRuntimeConfig.notes.length > 0) {
       commandNotes.unshift(...preparedRuntimeConfig.notes);
@@ -1170,7 +1195,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         forceSaferInvocation ? { ...config, fastMode: false } : config,
         {
           resumeSessionId,
-          skipGitRepoCheck: executionTargetIsSandbox,
+          skipGitRepoCheck,
         },
       );
       const args = execArgs.args;
