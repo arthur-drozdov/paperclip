@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentParams, resolveSessionKey } from "./execute.js";
+import { buildAgentParams, buildWakeText, resolveClaimedApiKeyPath, resolveSessionKey } from "./execute.js";
+
+const wakePayload = {
+  runId: "run-123",
+  agentId: "meridian",
+  companyId: "company-456",
+  taskId: "task-789",
+  issueId: "issue-789",
+  wakeReason: "assignment",
+  wakeCommentId: null,
+  approvalId: null,
+  approvalStatus: null,
+  issueIds: ["issue-789"],
+};
 
 describe("resolveSessionKey", () => {
   it("prefixes run-scoped session keys with the configured agent", () => {
@@ -96,5 +109,28 @@ describe("buildAgentParams", () => {
       sessionKey: "paperclip",
       idempotencyKey: "run-123",
     });
+  });
+});
+
+describe("OpenClaw Paperclip credential hints", () => {
+  it("uses the configured claimed API-key path rather than the legacy default", () => {
+    expect(resolveClaimedApiKeyPath(" /run/paperclip-keys/sonnia.json ")).toBe(
+      "/run/paperclip-keys/sonnia.json",
+    );
+
+    const wakeText = buildWakeText(
+      wakePayload,
+      { PAPERCLIP_API_URL: "http://paperclip.internal:3100" },
+      "",
+      "/run/paperclip-keys/sonnia.json",
+    );
+
+    expect(wakeText).toContain("PAPERCLIP_API_KEY=<token from /run/paperclip-keys/sonnia.json>");
+    expect(wakeText).toContain("Load PAPERCLIP_API_KEY from /run/paperclip-keys/sonnia.json");
+    expect(wakeText).not.toContain("~/.openclaw/workspace/paperclip-claimed-api-key.json");
+  });
+
+  it("retains the documented default when no path is configured", () => {
+    expect(resolveClaimedApiKeyPath(undefined)).toBe("~/.openclaw/workspace/paperclip-claimed-api-key.json");
   });
 });
