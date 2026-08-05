@@ -476,6 +476,58 @@ describe.sequential("agent permission routes", () => {
     expect(res.body.permissions).toMatchObject({ trustPreset: LOW_TRUST_REVIEW_PRESET });
   }, 20_000);
 
+  it("redacts OpenClaw gateway credentials from unrestricted agent detail", async () => {
+    mockAgentService.getById.mockResolvedValue({
+      ...baseAgent,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "ws://openclaw.example.test:18789",
+        authToken: "gateway-token-value",
+        password: "gateway-password-value",
+        devicePrivateKeyPem: "-----BEGIN PRIVATE KEY-----\nprivate-key-value\n-----END PRIVATE KEY-----",
+        scopes: ["operator.admin"],
+      },
+      runtimeConfig: {
+        modelProfiles: {
+          default: {
+            enabled: true,
+            adapterConfig: {
+              devicePrivateKeyPem: "runtime-private-key-value",
+            },
+          },
+        },
+      },
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl).get(`/api/agents/${agentId}`));
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.adapterConfig).toMatchObject({
+      url: "ws://openclaw.example.test:18789",
+      scopes: ["operator.admin"],
+      authToken: "***REDACTED***",
+      password: "***REDACTED***",
+      devicePrivateKeyPem: "***REDACTED***",
+    });
+    expect(res.body.runtimeConfig).toMatchObject({
+      modelProfiles: {
+        default: {
+          adapterConfig: {
+            devicePrivateKeyPem: "***REDACTED***",
+          },
+        },
+      },
+    });
+  });
+
   it("redacts company agent list for authenticated company members without agent admin permission", async () => {
     mockAccessService.canUser.mockResolvedValue(false);
     mockAccessService.decide.mockImplementation(async (input: { action?: string }) => ({

@@ -665,8 +665,24 @@ export function agentRoutes(
       buildAgentAccessState(agent),
     ]);
 
+    // Gateway credentials are needed by the server at dispatch time, but they
+    // are never useful to an agent or board UI after persistence. Keep secret
+    // references visible so an operator can identify/configure the binding,
+    // while redacting any legacy/plain value that may still exist in an older
+    // row. This is deliberately limited to OpenClaw's top-level gateway
+    // credentials; unrelated adapter settings keep their existing visibility
+    // contract.
+    const visibleAgent = options?.restricted
+      ? redactForRestrictedAgentView(agent)
+      : agent.adapterType === "openclaw_gateway"
+        ? {
+            ...agent,
+            adapterConfig: redactEventPayload(agent.adapterConfig),
+            runtimeConfig: redactEventPayload(agent.runtimeConfig),
+          }
+        : agent;
     return {
-      ...(options?.restricted ? redactForRestrictedAgentView(agent) : agent),
+      ...visibleAgent,
       chainOfCommand,
       access: accessState,
     };
