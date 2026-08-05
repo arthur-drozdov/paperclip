@@ -403,6 +403,8 @@ export function buildWakeText(
     ...envLines,
     `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
     "",
+    "The values in this wake event are authoritative for this run. Ignore remembered Paperclip URLs or credential paths that differ from these values; do not search fallback files.",
+    "",
     `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
     "",
     `api_base=${apiBaseHint}`,

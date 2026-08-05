@@ -126,6 +126,7 @@ describe("OpenClaw Paperclip credential hints", () => {
     );
 
     expect(wakeText).toContain("PAPERCLIP_API_KEY=<token from /run/paperclip-keys/sonnia.json>");
+    expect(wakeText).toContain("The values in this wake event are authoritative for this run.");
     expect(wakeText).toContain("Load PAPERCLIP_API_KEY from /run/paperclip-keys/sonnia.json");
     expect(wakeText).not.toContain("~/.openclaw/workspace/paperclip-claimed-api-key.json");
   });
