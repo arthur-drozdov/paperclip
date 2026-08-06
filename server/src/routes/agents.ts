@@ -798,6 +798,45 @@ export function agentRoutes(
     throw forbidden(decision.explanation, authorizationDeniedDetails(decision));
   }
 
+  /**
+   * Agent lifecycle is day-to-day company management, not a human-board-only
+   * operation. A same-company CEO can pause, resume, clear an operational
+   * error, or retire an existing worker. Human board members retain the same
+   * authority they had before; non-CEO agents remain unable to manage peers.
+   */
+  async function assertCanManageAgentLifecycle(
+    req: Request,
+    targetAgent: { id: string; companyId: string; status?: string },
+  ) {
+    assertCompanyAccess(req, targetAgent.companyId);
+    if (req.actor.type === "board") {
+      await assertBoardCanManageAgentsForCompany(req, targetAgent.companyId);
+      return;
+    }
+    if (req.actor.type !== "agent" || !req.actor.agentId) {
+      throw forbidden("Board or CEO agent authentication required");
+    }
+
+    const actorAgent = await svc.getById(req.actor.agentId);
+    if (!actorAgent || actorAgent.companyId !== targetAgent.companyId) {
+      throw forbidden("Agent key cannot access another company");
+    }
+    if (actorAgent.role !== "ceo") {
+      throw forbidden("Only CEO agents can manage agent lifecycle");
+    }
+  }
+
+  function lifecycleActivityActor(req: Request) {
+    const actor = getActorInfo(req);
+    return {
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      agentApiKeyId: actor.agentApiKeyId,
+    };
+  }
+
   async function assertCanReadConfigurations(req: Request, companyId: string) {
     // Reading agent configurations, skills, and config revisions is a
     // read-only operation available to any board (human) member of the
@@ -3228,11 +3267,12 @@ export function agentRoutes(
   });
 
   router.post("/agents/:id/pause", async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
-    if (!(await getAccessibleAgent(req, res, id))) {
+    const existing = await getAccessibleAgent(req, res, id);
+    if (!existing) {
       return;
     }
+    await assertCanManageAgentLifecycle(req, existing);
     const agent = await svc.pause(id);
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
@@ -3243,8 +3283,7 @@ export function agentRoutes(
 
     await logActivity(db, {
       companyId: agent.companyId,
-      actorType: "user",
-      actorId: req.actor.userId ?? "board",
+      ...lifecycleActivityActor(req),
       action: "agent.paused",
       entityType: "agent",
       entityId: agent.id,
@@ -3254,12 +3293,12 @@ export function agentRoutes(
   });
 
   router.post("/agents/:id/resume", async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
     const existing = await getAccessibleAgent(req, res, id);
     if (!existing) {
       return;
     }
+    await assertCanManageAgentLifecycle(req, existing);
     if (existing.orgChainHealth?.status === "invalid_org_chain") {
       res.status(409).json({
         error: existing.orgChainHealth?.repairGuidance ?? "Repair this agent's reporting chain before resuming it",
@@ -3274,8 +3313,7 @@ export function agentRoutes(
 
     await logActivity(db, {
       companyId: agent.companyId,
-      actorType: "user",
-      actorId: req.actor.userId ?? "board",
+      ...lifecycleActivityActor(req),
       action: "agent.resumed",
       entityType: "agent",
       entityId: agent.id,
@@ -3285,12 +3323,12 @@ export function agentRoutes(
   });
 
   router.post("/agents/:id/clear-error", async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
     const existing = await getAccessibleAgent(req, res, id);
     if (!existing) {
       return;
     }
+    await assertCanManageAgentLifecycle(req, existing);
     if (existing.orgChainHealth?.status === "invalid_org_chain") {
       res.status(409).json({
         error: existing.orgChainHealth?.repairGuidance ?? "Repair this agent's reporting chain before clearing its error",
@@ -3306,8 +3344,7 @@ export function agentRoutes(
 
     await logActivity(db, {
       companyId: agent.companyId,
-      actorType: "user",
-      actorId: req.actor.userId ?? "board",
+      ...lifecycleActivityActor(req),
       action: "agent.error_cleared",
       entityType: "agent",
       entityId: agent.id,
@@ -3371,11 +3408,15 @@ export function agentRoutes(
   });
 
   router.post("/agents/:id/terminate", async (req, res) => {
-    assertBoard(req);
     const id = req.params.id as string;
     const existing = await getAccessibleAgent(req, res, id);
     if (!existing) {
       return;
+    }
+    await assertCanManageAgentLifecycle(req, existing);
+
+    if (existing.status === "pending_approval" && req.actor.type === "agent") {
+      throw forbidden("Only the board can resolve a pending hiring approval");
     }
 
     // Terminating an agent that is still awaiting approval is the agent-detail
@@ -3418,8 +3459,7 @@ export function agentRoutes(
 
     await logActivity(db, {
       companyId: agent.companyId,
-      actorType: "user",
-      actorId: req.actor.userId ?? "board",
+      ...lifecycleActivityActor(req),
       action: "agent.terminated",
       entityType: "agent",
       entityId: agent.id,

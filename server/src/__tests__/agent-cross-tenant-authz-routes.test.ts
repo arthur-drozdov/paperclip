@@ -6,6 +6,7 @@ vi.unmock("http");
 vi.unmock("node:http");
 
 const agentId = "11111111-1111-4111-8111-111111111111";
+const ceoAgentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const companyId = "22222222-2222-4222-8222-222222222222";
 const keyId = "33333333-3333-4333-8333-333333333333";
 
@@ -32,6 +33,15 @@ const baseAgent = {
   metadata: null,
   createdAt: new Date("2026-04-11T00:00:00.000Z"),
   updatedAt: new Date("2026-04-11T00:00:00.000Z"),
+};
+
+const baseCeoAgent = {
+  ...baseAgent,
+  id: ceoAgentId,
+  name: "CEO",
+  urlKey: "ceo",
+  role: "ceo",
+  title: "Chief Executive",
 };
 
 const baseKey = {
@@ -299,7 +309,9 @@ function resetMockDefaults() {
   mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
   currentKeyAgentId = agentId;
   currentAccessCanUser = false;
-  mockAgentService.getById.mockImplementation(async () => ({ ...baseAgent }));
+  mockAgentService.getById.mockImplementation(async (id: string) => (
+    id === ceoAgentId ? { ...baseCeoAgent } : { ...baseAgent }
+  ));
   mockAgentService.pause.mockImplementation(async () => ({ ...baseAgent }));
   mockAgentService.resume.mockImplementation(async () => ({ ...baseAgent }));
   mockAgentService.clearError.mockImplementation(async () => ({ ...baseAgent, status: "idle" }));
@@ -420,7 +432,7 @@ describe.sequential("agent cross-tenant route authorization", () => {
     expect(mockAgentService.revokeKey).not.toHaveBeenCalled();
   });
 
-  it("requires board access before clearing an agent error", async () => {
+  it("keeps lifecycle management unavailable to non-CEO agents", async () => {
     const app = await createApp({
       type: "agent",
       agentId,
@@ -433,8 +445,33 @@ describe.sequential("agent cross-tenant route authorization", () => {
     );
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain("Board access required");
+    expect(res.body.error).toContain("Only CEO agents can manage agent lifecycle");
     expect(mockAgentService.clearError).not.toHaveBeenCalled();
+  });
+
+  it("allows a same-company CEO agent to pause an existing worker", async () => {
+    const app = await createApp({
+      type: "agent",
+      agentId: ceoAgentId,
+      companyId,
+      runId: "run-ceo-1",
+    });
+
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl).post(`/api/agents/${agentId}/pause`).send({}),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.pause).toHaveBeenCalledWith(agentId);
+    expect(mockHeartbeatService.cancelActiveForAgent).toHaveBeenCalledWith(agentId);
+    expect(mockLogActivity).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      companyId,
+      actorType: "agent",
+      actorId: ceoAgentId,
+      agentId: ceoAgentId,
+      runId: "run-ceo-1",
+      action: "agent.paused",
+    }));
   });
 
   it("clears error agents and records a distinct audit action", async () => {
