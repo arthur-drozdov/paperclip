@@ -23,6 +23,14 @@ Some adapters also inject `PAPERCLIP_WAKE_PAYLOAD_JSON` on comment-driven wakes.
 
 Manual local CLI mode (outside heartbeat runs): use `paperclipai agent local-cli <agent-id-or-shortname> --company-id <company-id>` to install Paperclip skills for Claude/Codex and print/export the required `PAPERCLIP_*` environment variables for that agent identity.
 
+**Interactive-session fallback.** An ordinary chat session may not have a
+run-scoped API key or run id. If the `paperclip-interactive-session` skill is
+available, use it before declaring Paperclip unavailable: it carries the
+current request to a real Paperclip wake for the same agent, where this skill's
+normal authorization and audit rules apply. Do not fabricate a run id, treat a
+durable identity credential as a general mutation key, or claim the requested
+board change completed merely because a wake was queued.
+
 **Run audit trail:** You MUST include `-H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID'` on every API request that modifies control-plane state (including issue, decision, approval, routine, and agent mutations). This links your actions to the current heartbeat run for traceability.
 
 ## The Heartbeat Procedure
