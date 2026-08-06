@@ -10,6 +10,15 @@ import { envConfigSchema } from "./secret.js";
 import { trustAuthorizationPolicySchema, trustPresetSchema } from "./trust-policy.js";
 import { agentDesiredSkillSelectionSchema } from "./adapter-skills.js";
 
+/**
+ * Maximum size of an operator message attached to a direct agent wake.
+ *
+ * Heartbeat prompt materialization applies an additional redaction/bounding
+ * pass, but keeping the request bound in the shared schema prevents callers
+ * from persisting arbitrarily large message bodies in a run context.
+ */
+export const AGENT_WAKE_MESSAGE_MAX_CHARS = 12_000;
+
 export const agentPermissionsSchema = z.object({
   canCreateAgents: z.boolean().optional().default(false),
   canCreateSkills: z.boolean().optional().default(true),
@@ -194,6 +203,7 @@ export const wakeAgentSchema = z.object({
   source: z.enum(["timer", "assignment", "on_demand", "automation"]).optional().default("on_demand"),
   triggerDetail: z.enum(["manual", "ping", "callback", "system"]).optional(),
   reason: z.string().optional().nullable(),
+  message: z.string().trim().min(1).max(AGENT_WAKE_MESSAGE_MAX_CHARS).optional().nullable(),
   payload: z.record(z.string(), z.unknown()).optional().nullable(),
   idempotencyKey: z.string().optional().nullable(),
   forceFreshSession: z.preprocess(

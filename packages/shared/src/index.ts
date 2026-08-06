@@ -1608,6 +1608,7 @@ export {
   skillTestAgentKeyScopeSchema,
   createAgentKeySchema,
   agentMineInboxQuerySchema,
+  AGENT_WAKE_MESSAGE_MAX_CHARS,
   wakeAgentSchema,
   resetAgentSessionSchema,
   testAdapterEnvironmentSchema,

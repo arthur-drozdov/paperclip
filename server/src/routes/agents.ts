@@ -24,6 +24,7 @@ import {
   updateAgentInstructionsBundleSchema,
   updateAgentPermissionsSchema,
   updateAgentInstructionsPathSchema,
+  AGENT_WAKE_MESSAGE_MAX_CHARS,
   wakeAgentSchema,
   updateAgentSchema,
   supportedEnvironmentDriversForAdapter,
@@ -3551,6 +3552,28 @@ export function agentRoutes(
     source: HeartbeatSource | undefined;
     skippedResponse: (agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>) => unknown | Promise<unknown>;
   };
+
+  /**
+   * Preserve a direct, authenticated operator message in the heartbeat
+   * context. The heartbeat service performs the final redaction and prompt
+   * bounding; this route only records the bounded text and its transport
+   * provenance so normal Paperclip wake rendering can surface it.
+   */
+  const addWakeMessage = (
+    contextSnapshot: Record<string, unknown>,
+    message: string | null | undefined,
+  ): Record<string, unknown> => {
+    const text = typeof message === "string" ? message.trim() : "";
+    if (!text) return contextSnapshot;
+    return {
+      ...contextSnapshot,
+      paperclipAgentMessage: {
+        text,
+        source: "api_wakeup",
+      },
+    };
+  };
+
   const handleWakeupRoute = async (
     req: Request,
     res: Response,
@@ -3583,11 +3606,11 @@ export function agentRoutes(
       idempotencyKey: req.body.idempotencyKey ?? null,
       requestedByActorType: req.actor.type === "agent" ? "agent" : "user",
       requestedByActorId: req.actor.type === "agent" ? req.actor.agentId ?? null : req.actor.userId ?? null,
-      contextSnapshot: {
+      contextSnapshot: addWakeMessage({
         triggeredBy: req.actor.type,
         actorId: req.actor.type === "agent" ? req.actor.agentId : req.actor.userId,
         forceFreshSession: req.body.forceFreshSession === true,
-      },
+      }, req.body.message),
     });
 
     if (!run) {
@@ -3651,7 +3674,22 @@ export function agentRoutes(
       idempotencyKey: unknown;
       forceFreshSession: unknown;
       triggerDetail: unknown;
+      message: unknown;
     }>;
+    const rawMessage = body.message;
+    if (
+      rawMessage !== undefined &&
+      rawMessage !== null &&
+      (typeof rawMessage !== "string" ||
+        rawMessage.trim().length === 0 ||
+        rawMessage.trim().length > AGENT_WAKE_MESSAGE_MAX_CHARS)
+    ) {
+      res.status(400).json({
+        error: `message must be a non-empty string of at most ${AGENT_WAKE_MESSAGE_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    const message = typeof rawMessage === "string" ? rawMessage.trim() : null;
     const contextSnapshot: Record<string, unknown> = {
       triggeredBy: req.actor.type,
       actorId: req.actor.type === "agent" ? req.actor.agentId : req.actor.userId,
@@ -3659,12 +3697,13 @@ export function agentRoutes(
     if (body.forceFreshSession === true) {
       contextSnapshot.forceFreshSession = true;
     }
+    const wakeContextSnapshot = addWakeMessage(contextSnapshot, message);
     const wakeOpts: Parameters<typeof heartbeat.wakeup>[1] = {
       source: "on_demand",
       triggerDetail: typeof body.triggerDetail === "string" ? body.triggerDetail as "manual" | "system" | "ping" | "callback" : "manual",
       requestedByActorType: req.actor.type === "agent" ? "agent" : "user",
       requestedByActorId: req.actor.type === "agent" ? req.actor.agentId ?? null : req.actor.userId ?? null,
-      contextSnapshot,
+      contextSnapshot: wakeContextSnapshot,
     };
     if (typeof body.reason === "string" && body.reason.length > 0) {
       wakeOpts.reason = body.reason;

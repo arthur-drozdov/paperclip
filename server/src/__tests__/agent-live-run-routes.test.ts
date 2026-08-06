@@ -596,6 +596,7 @@ describe("agent live run routes", () => {
             taskKey: "issue-1",
           },
           forceFreshSession: true,
+          message: "Please continue the assigned work and report the next concrete step.",
         }),
     );
 
@@ -620,8 +621,58 @@ describe("agent live run routes", () => {
         triggeredBy: "board",
         actorId: "local-board",
         forceFreshSession: true,
+        paperclipAgentMessage: {
+          text: "Please continue the assigned work and report the next concrete step.",
+          source: "api_wakeup",
+        },
       },
     });
+  });
+
+  it("passes a direct message through the authenticated modern wakeup route", async () => {
+    const res = await requestApp(
+      await createApp(),
+      (baseUrl) => request(baseUrl)
+        .post(`/api/agents/${routeAgentId}/wakeup`)
+        .send({
+          source: "on_demand",
+          triggerDetail: "manual",
+          message: "Please take the next concrete action on this task.",
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(202);
+    expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(routeAgentId, {
+      source: "on_demand",
+      triggerDetail: "manual",
+      reason: null,
+      payload: null,
+      idempotencyKey: null,
+      requestedByActorType: "user",
+      requestedByActorId: "local-board",
+      contextSnapshot: {
+        triggeredBy: "board",
+        actorId: "local-board",
+        forceFreshSession: false,
+        paperclipAgentMessage: {
+          text: "Please take the next concrete action on this task.",
+          source: "api_wakeup",
+        },
+      },
+    });
+  });
+
+  it("rejects an overlong direct wake message before creating a run", async () => {
+    const res = await requestApp(
+      await createApp(),
+      (baseUrl) => request(baseUrl)
+        .post(`/api/agents/${routeAgentId}/wakeup`)
+        .send({ message: "x".repeat(12_001) }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Validation error");
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
   });
 
   it("calls heartbeat.wakeup with the legacy minimal shape when the body is empty", async () => {
