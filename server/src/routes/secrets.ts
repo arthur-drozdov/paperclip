@@ -226,6 +226,7 @@ export function secretRoutes(db: Db, deps: SecretRoutesDeps = {}) {
       await queueIssueAssignmentWakeup({
         heartbeat,
         issue,
+        getDependencyReadiness: () => issues.getDependencyReadiness(issue.id),
         reason: "secret_proposal_resolved",
         mutation: `secret_proposal_${input.status}`,
         contextSource: "secret.proposal.resolution",
