@@ -323,13 +323,18 @@ function buildWakePayload(ctx: AdapterExecutionContext): WakePayload {
   };
 }
 
-function resolvePaperclipApiUrlOverride(value: unknown): string | null {
+export function resolvePaperclipApiUrlOverride(value: unknown): string | null {
   const raw = nonEmpty(value);
   if (!raw) return null;
   try {
     const parsed = new URL(raw);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
+    // URL#toString serializes an origin-only URL with a trailing slash. The
+    // Paperclip skill and API examples append `/api/...`; retaining that slash
+    // therefore produces `//api/...`, which Express treats as a different path
+    // (GET falls through to the SPA and mutations return 404). Keep a canonical
+    // origin/base path so raw API examples and the helper behave identically.
+    return parsed.toString().replace(/\/+$/, "");
   } catch {
     return null;
   }

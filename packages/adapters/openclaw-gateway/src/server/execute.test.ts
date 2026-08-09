@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentParams, buildWakeText, resolveClaimedApiKeyPath, resolveSessionKey } from "./execute.js";
+import {
+  buildAgentParams,
+  buildWakeText,
+  resolveClaimedApiKeyPath,
+  resolvePaperclipApiUrlOverride,
+  resolveSessionKey,
+} from "./execute.js";
 
 const wakePayload = {
   runId: "run-123",
@@ -133,6 +139,21 @@ describe("OpenClaw Paperclip credential hints", () => {
 
   it("retains the documented default when no path is configured", () => {
     expect(resolveClaimedApiKeyPath(undefined)).toBe("~/.openclaw/workspace/paperclip-claimed-api-key.json");
+  });
+});
+
+describe("resolvePaperclipApiUrlOverride", () => {
+  it("removes trailing slashes before the wake environment is rendered", () => {
+    expect(resolvePaperclipApiUrlOverride("http://paperclip.internal:3100/")).toBe(
+      "http://paperclip.internal:3100",
+    );
+    expect(resolvePaperclipApiUrlOverride("https://paperclip.example/base///")).toBe(
+      "https://paperclip.example/base",
+    );
+  });
+
+  it("rejects non-http URLs", () => {
+    expect(resolvePaperclipApiUrlOverride("file:///tmp/paperclip")).toBeNull();
   });
 });
 
