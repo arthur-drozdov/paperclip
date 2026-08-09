@@ -9,6 +9,10 @@ const SECRET_PAYLOAD_KEY_RE = new RegExp(SECRET_FIELD_NAME_PATTERN, "i");
 // "authorization". JWT-shaped values are still caught by the value guard below.
 const AUDIT_REASON_PAYLOAD_KEY_RE = /^authorizationReason$/;
 const AUDIT_SURFACE_PAYLOAD_KEY_RE = /^surface$/;
+// This field names a local credential file; it is not itself credential
+// material. Keeping it visible lets operators round-trip an OpenClaw adapter
+// configuration without replacing the path with the redaction sentinel.
+const NON_SECRET_CREDENTIAL_LOCATION_KEY_RE = /^claimedApiKeyPath$/;
 const COMMAND_PAYLOAD_KEY_RE =
   /(^command$|^cmd$|command[-_]?line|resolved[-_]?command|PAPERCLIP_RESOLVED_COMMAND)/i;
 const COMMAND_ARGS_PAYLOAD_KEY_RE = /^(commandArgs|command_?args|argv)$/i;
@@ -99,6 +103,10 @@ function sanitizeCommandArgs(args: unknown[]): unknown[] {
 export function sanitizeRecord(record: Record<string, unknown>): Record<string, unknown> {
   const redacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
+    if (NON_SECRET_CREDENTIAL_LOCATION_KEY_RE.test(key) && typeof value === "string") {
+      redacted[key] = value;
+      continue;
+    }
     if (COMMAND_ARGS_PAYLOAD_KEY_RE.test(key) && Array.isArray(value)) {
       redacted[key] = sanitizeCommandArgs(value);
       continue;

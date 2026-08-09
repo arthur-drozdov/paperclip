@@ -44,6 +44,16 @@ describe("redaction", () => {
     });
   });
 
+  it("keeps credential file locations visible without exposing credential values", () => {
+    const result = sanitizeRecord({
+      claimedApiKeyPath: "/run/paperclip-keys/product-lead.json",
+      apiKey: "secret-value",
+    });
+
+    expect(result.claimedApiKeyPath).toBe("/run/paperclip-keys/product-lead.json");
+    expect(result.apiKey).toBe(REDACTED_EVENT_VALUE);
+  });
+
   it("redacts jwt-looking values even when key name is not sensitive", () => {
     const input = {
       session: "aaa.bbb.ccc",

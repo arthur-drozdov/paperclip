@@ -172,6 +172,39 @@ function readRunIssueId(context: Record<string, unknown> | null) {
   return typeof nestedIssueId === "string" && isUuidLike(nestedIssueId) ? nestedIssueId : null;
 }
 
+export function ensureGatewayDeviceKey(
+  adapterType: string | null | undefined,
+  adapterConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  if (adapterType !== "openclaw_gateway") return adapterConfig;
+  const disableDeviceAuth =
+    adapterConfig.disableDeviceAuth === true
+    || (typeof adapterConfig.disableDeviceAuth === "string"
+      && ["true", "1", "yes", "on"].includes(adapterConfig.disableDeviceAuth.trim().toLowerCase()));
+  if (disableDeviceAuth) return adapterConfig;
+
+  const configuredDeviceKey = adapterConfig.devicePrivateKeyPem;
+  if (typeof configuredDeviceKey === "string" && configuredDeviceKey.trim().length > 0) {
+    return adapterConfig;
+  }
+  if (
+    typeof configuredDeviceKey === "object"
+    && configuredDeviceKey !== null
+    && !Array.isArray(configuredDeviceKey)
+    && (configuredDeviceKey as Record<string, unknown>).type === "secret_ref"
+    && typeof (configuredDeviceKey as Record<string, unknown>).secretId === "string"
+    && ((configuredDeviceKey as Record<string, unknown>).secretId as string).trim().length > 0
+  ) {
+    return adapterConfig;
+  }
+
+  const { privateKey } = generateKeyPairSync("ed25519");
+  return {
+    ...adapterConfig,
+    devicePrivateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  };
+}
+
 export function agentRoutes(
   db: Db,
   options: { pluginWorkerManager?: PluginWorkerManager } = {},
@@ -1339,22 +1372,6 @@ export function agentRoutes(
     }
 
     return normalizedRuntimeConfig;
-  }
-
-  function generateEd25519PrivateKeyPem(): string {
-    const { privateKey } = generateKeyPairSync("ed25519");
-    return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-  }
-
-  function ensureGatewayDeviceKey(
-    adapterType: string | null | undefined,
-    adapterConfig: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (adapterType !== "openclaw_gateway") return adapterConfig;
-    const disableDeviceAuth = parseBooleanLike(adapterConfig.disableDeviceAuth) === true;
-    if (disableDeviceAuth) return adapterConfig;
-    if (asNonEmptyString(adapterConfig.devicePrivateKeyPem)) return adapterConfig;
-    return { ...adapterConfig, devicePrivateKeyPem: generateEd25519PrivateKeyPem() };
   }
 
   function codexLocalAgentHome(companyId: string, agentId: string): string {
