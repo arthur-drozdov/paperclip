@@ -281,7 +281,9 @@ if [[ -z "$issue_id" || -z "$company_id" ]]; then
   exit 1
 fi
 
-api_base="${PAPERCLIP_API_URL%/}/api"
+api_root="${PAPERCLIP_API_URL%/}"
+api_root="${api_root%/api}"
+api_base="$api_root/api"
 attachment="$(
   upload_file \
     "$api_base/companies/$company_id/issues/$issue_id/attachments" \
