@@ -2152,6 +2152,13 @@ export function authorizationService(db: Db) {
     }
 
     if (input.action === "agent_config:update") {
+      if (actorAgent.role === "ceo") {
+        return allow({
+          action: input.action,
+          reason: "allow_company_agent",
+          explanation: "Allowed because the actor is the active company CEO.",
+        });
+      }
       return decideWithProtectedChangeGrants("agent", actorAgentId, {
         direct: "agents:configure",
         suggest: "agents:suggest-changes",

@@ -34,7 +34,7 @@ import { logger } from "../middleware/logger.js";
 
 type SecretRoutesDeps = {
   heartbeat?: IssueAssignmentWakeupDeps;
-  issues?: Pick<ReturnType<typeof issueService>, "getById" | "addComment">;
+  issues?: Pick<ReturnType<typeof issueService>, "getById" | "addComment" | "getDependencyReadiness">;
 };
 
 const DEFAULT_PROPOSAL_LIST_LIMIT = 100;
