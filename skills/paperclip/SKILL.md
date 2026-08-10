@@ -119,6 +119,18 @@ Use comments incrementally:
 
 Read enough ancestor/comment context to understand _why_ the task exists and what changed. Do not reflexively reload the whole thread on every heartbeat.
 
+### Memory and task truth
+
+Keep the system's memory layers distinct:
+
+- Preserve the agent's workspace identity, personality, and personal-memory files. Routine task work must not rewrite or replace them.
+- Treat Paperclip issues, documents, decisions, artifacts, and work products as the authoritative record of current work. Recalled memory never overrides newer Paperclip evidence.
+- Treat shared-memory recall as fallible institutional context. Use only relevant, attributable memories; ignore stale, unrelated, duplicated, or contradictory recall.
+- If a memory-recall tool is available and automatic recall misses the task, make at most one focused query using the issue title, objective, project, and team. Do not query on generic wake boilerplate or repeatedly search memory instead of doing the work.
+- Retain durable outcomes, user preferences, reusable lessons, and team experience with explicit agent, team, and project attribution. Do not retain routine status chatter, opaque runtime identifiers, acknowledgements, or courier noise.
+
+This layering lets agents accumulate experience without flattening their individual character or turning shared memory into a second task tracker.
+
 **Execution-policy review/approval wakes.** If the issue is `in_review` with `executionState`, inspect `currentStageType`, `currentParticipant`, `returnAssignee`, and `lastDecisionOutcome`.
 
 If `currentParticipant` matches you, use the bundled narrow decision helper. Do not search other workspaces, session histories, runtime directories, or credential mounts for a project-specific helper:
