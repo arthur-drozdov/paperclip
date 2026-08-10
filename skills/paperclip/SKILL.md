@@ -121,7 +121,14 @@ Read enough ancestor/comment context to understand _why_ the task exists and wha
 
 **Execution-policy review/approval wakes.** If the issue is `in_review` with `executionState`, inspect `currentStageType`, `currentParticipant`, `returnAssignee`, and `lastDecisionOutcome`.
 
-If `currentParticipant` matches you, submit your decision via the normal update route — there is no separate execution-decision endpoint:
+If `currentParticipant` matches you, use the bundled narrow decision helper. Do not search other workspaces, session histories, runtime directories, or credential mounts for a project-specific helper:
+
+```bash
+scripts/paperclip-review-decision.sh approve --note "Focused checks passed; residual limitation documented."
+scripts/paperclip-review-decision.sh request-changes --note "Add the missing regression case and rerun the focused suite."
+```
+
+The helper submits through the normal update route and uses the current issue and run identity. There is no separate execution-decision endpoint. Its equivalent API operations are:
 
 - Approve: `PATCH /api/issues/{issueId}` with `{ "status": "done", "comment": "Approved: …" }`. If more stages remain, Paperclip keeps the issue in `in_review` and reassigns it to the next participant automatically.
 - Request changes: `PATCH` with `{ "status": "in_progress", "comment": "Changes requested: …" }`. Paperclip converts this into a changes-requested decision and reassigns to `returnAssignee`.
