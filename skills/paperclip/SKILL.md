@@ -124,6 +124,7 @@ Read enough ancestor/comment context to understand _why_ the task exists and wha
 Keep the system's memory layers distinct:
 
 - Preserve the agent's workspace identity, personality, and personal-memory files. Routine task work must not rewrite or replace them.
+- If an already-initialized workspace still exposes generic first-run or bootstrap instructions alongside established identity files, do not restart onboarding during a work heartbeat and do not rewrite the agent's identity. Treat the bootstrap material as stale provisioning residue and report it for separate cleanup.
 - Treat Paperclip issues, documents, decisions, artifacts, and work products as the authoritative record of current work. Recalled memory never overrides newer Paperclip evidence.
 - Treat shared-memory recall as fallible institutional context. Use only relevant, attributable memories; ignore stale, unrelated, duplicated, or contradictory recall.
 - If a memory-recall tool is available and automatic recall misses the task, make at most one focused query using the issue title, objective, project, and team. Do not query on generic wake boilerplate or repeatedly search memory instead of doing the work.
