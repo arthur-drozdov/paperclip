@@ -128,6 +128,8 @@ scripts/paperclip-review-decision.sh approve --note "Focused checks passed; resi
 scripts/paperclip-review-decision.sh request-changes --note "Add the missing regression case and rerun the focused suite."
 ```
 
+Judge the handoff against the workspace that Paperclip actually provisioned. In a Git workspace, require the relevant commit or branch work product. In an intentionally non-Git workspace, do **not** demand a Git commit or search elsewhere for a repository; require an inspectable workspace-file/artifact work product, a content digest or bounded diff, and the verification evidence instead.
+
 The helper submits through the normal update route and uses the current issue and run identity. There is no separate execution-decision endpoint. Its equivalent API operations are:
 
 - Approve: `PATCH /api/issues/{issueId}` with `{ "status": "done", "comment": "Approved: …" }`. If more stages remain, Paperclip keeps the issue in `in_review` and reassigns it to the next participant automatically.
