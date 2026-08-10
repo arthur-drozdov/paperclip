@@ -17,7 +17,7 @@ In Paperclip, **task** and **issue** refer to the same work item. The UI may use
 
 ## Authentication
 
-Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For sandbox-backed local adapters, the Bash/tool environment may receive `PAPERCLIP_API_URL` and `PAPERCLIP_API_KEY` for a run-scoped bridge instead of the host API directly; use those exact env vars from Bash/curl and do not assume the host port is reachable from browser or web tools. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. Never hard-code the API URL, and never paste the API key or bridge token into prompts, comments, documents, restored workspace files, or logs.
+Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). Local adapters normally inject `PAPERCLIP_API_KEY` as a short-lived run JWT. Other runtimes may instead mount a credential selected for `PAPERCLIP_AGENT_ID`. The bundled helper resolves either form automatically and verifies that a mounted credential belongs to the current agent. Call the helper first; do not enumerate credential files or inspect, print, compare, or report token values or lengths. For sandbox-backed local adapters, use the exact `PAPERCLIP_API_URL` provided to the Bash/tool environment and do not assume the host port is reachable from browser or web tools. All requests use bearer authentication internally. Never hard-code the API URL, and never paste an API key or bridge token into prompts, comments, documents, restored workspace files, or logs.
 
 **Use the bundled API helper instead of assembling URLs by hand.** Resolve
 `scripts/paperclip-api.sh` relative to this skill directory and pass a method
@@ -30,8 +30,8 @@ scripts/paperclip-api.sh PATCH "/issues/$PAPERCLIP_TASK_ID" payload.json
 ```
 
 The helper accepts `PAPERCLIP_API_URL` with or without a trailing `/api`, adds
-exactly one `/api`, uses the injected bearer token, adds the run-id header to
-writes, and rejects non-JSON responses. A `200 text/html` response is the
+exactly one `/api`, resolves the injected or matching mounted bearer token,
+adds the run-id header to writes, and rejects non-JSON responses. A `200 text/html` response is the
 frontend SPA fallback, **not** successful API authentication. Do not parse it,
 do not repeat the same guessed request, and do not use browser/web tools for
 control-plane API calls. If the helper is unavailable, normalize once with:

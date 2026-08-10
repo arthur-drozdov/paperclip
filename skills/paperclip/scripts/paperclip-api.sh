@@ -14,7 +14,62 @@ route=$2
 payload=${3:-}
 
 : "${PAPERCLIP_API_URL:?PAPERCLIP_API_URL is required}"
-: "${PAPERCLIP_API_KEY:?PAPERCLIP_API_KEY is required}"
+
+json_field() {
+  field=$1
+  file=$2
+  if command -v jq >/dev/null 2>&1; then
+    jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)' "$file"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2]); assert isinstance(value, str) and value; print(value)' "$file" "$field"
+  elif command -v node >/dev/null 2>&1; then
+    node -e 'const value=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]]; if (typeof value !== "string" || !value) process.exit(1); process.stdout.write(value)' "$file" "$field"
+  else
+    return 127
+  fi
+}
+
+credential_matches_agent() {
+  credential_file=$1
+  [ -r "$credential_file" ] || return 1
+  [ -n "${PAPERCLIP_AGENT_ID:-}" ] || return 0
+  credential_agent_id=$(json_field agentId "$credential_file" 2>/dev/null) || return 1
+  [ "$credential_agent_id" = "$PAPERCLIP_AGENT_ID" ]
+}
+
+load_api_key_from_file() {
+  credential_file=$1
+  credential_matches_agent "$credential_file" || return 1
+  resolved_key=$(json_field token "$credential_file" 2>/dev/null) || return 1
+  PAPERCLIP_API_KEY=$resolved_key
+  export PAPERCLIP_API_KEY
+}
+
+resolve_api_key() {
+  [ -n "${PAPERCLIP_API_KEY:-}" ] && return 0
+
+  credential_file=${PAPERCLIP_CLAIMED_API_KEY_PATH:-${PAPERCLIP_CREDENTIAL_PATH:-}}
+  if [ -n "$credential_file" ] && load_api_key_from_file "$credential_file"; then
+    return 0
+  fi
+
+  if [ -n "${PAPERCLIP_AGENT_ID:-}" ]; then
+    credential_dir=${PAPERCLIP_CREDENTIAL_DIR:-/run/paperclip-keys}
+    for credential_file in "$credential_dir"/*.json; do
+      [ -e "$credential_file" ] || continue
+      if load_api_key_from_file "$credential_file"; then
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
+resolve_api_key || {
+  echo "paperclip-api: PAPERCLIP_API_KEY is unavailable; inject it or mount a credential matching PAPERCLIP_AGENT_ID" >&2
+  exit 64
+}
 
 case "$route" in
   http://*|https://*)
