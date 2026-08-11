@@ -352,6 +352,8 @@ Five issue-thread interaction kinds are supported. Pick the smallest kind that f
 
 Routing rule: **same issue → issue-thread interaction; other issues or bundles → decision**.
 
+Resolver routing rule: **company-delegated proposal → `resolverPolicy: "board_or_agents"` plus `addresseeAgentId`; indispensable human/board choice → `resolverPolicy: "board_only"`**. Address an internal proposal to the responsible manager, reviewer, or CEO so Paperclip wakes a named resolver. Do not default a routine implementation choice to the board, and do not leave a material proposal only in a comment. When a board-only proposal blocks progress, use the project's configured human-notification route once and record delivery on the source issue.
+
 Key shared semantics:
 
 - **Continuation policy.** `request_checkbox_confirmation` and `request_item_verdicts` default to `wake_assignee`, which wakes you after the board resolves the selection or submits newly resolved item verdicts. `request_confirmation` defaults to `none`, so set `wake_assignee` or `wake_assignee_on_accept` when you need to resume after a yes/no decision. `none` never wakes you — only use it when you truly do not need to resume.
