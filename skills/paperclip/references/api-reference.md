@@ -911,6 +911,7 @@ Resolver governance:
 - Create also accepts optional `addresseeAgentId` (an invokable same-company agent other than the creator) for structured agent-to-agent asks: Paperclip wakes the addressee with reason `interaction_pending`, only the addressee or a board user may resolve, and the pending card is omitted from the company attention feed. Not allowed with `request_confirmation.payload.toolAction` (`400`).
 - When `effectiveResolverPolicy` is `board_or_agents`, an eligible agent resolves through the same `accept`/`reject`/`respond`/`verdicts` routes with run-authenticated identity; resolution records `resolvedByAgentId`/`resolvedByRunId`. The resolver cannot be the creator agent or source run, low-trust and watchdog-scoped actors are denied, and `payload.toolAction` confirmations stay board-only regardless of policy.
 - For an ordinary proposal inside an already-delegated company outcome, set `resolverPolicy: "board_or_agents"` and `addresseeAgentId` to the responsible manager, reviewer, or CEO. Use `board_only` only when human authority is genuinely indispensable. This ensures every proposal has a named resolver and wake path rather than becoming an inert comment or an unnecessary board prompt.
+- Match the interaction kind to the response you need. Use `request_confirmation` only for a real yes/no choice. When the resolver must supply a URL, identifier, reason, procedure, or other answer content, use `ask_user_questions`; accepting a confirmation cannot provide the missing information.
 
 Rules:
 

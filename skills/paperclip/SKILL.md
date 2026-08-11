@@ -352,7 +352,7 @@ Five issue-thread interaction kinds are supported. Pick the smallest kind that f
 
 Routing rule: **same issue → issue-thread interaction; other issues or bundles → decision**.
 
-Resolver routing rule: **company-delegated proposal → `resolverPolicy: "board_or_agents"` plus `addresseeAgentId`; indispensable human/board choice → `resolverPolicy: "board_only"`**. Address an internal proposal to the responsible manager, reviewer, or CEO so Paperclip wakes a named resolver. Do not default a routine implementation choice to the board, and do not leave a material proposal only in a comment. When a board-only proposal blocks progress, use the project's configured human-notification route once and record delivery on the source issue.
+Resolver routing rule: **company-delegated proposal → `resolverPolicy: "board_or_agents"` plus `addresseeAgentId`; indispensable human/board choice → `resolverPolicy: "board_only"`**. Address an internal proposal to the responsible manager, reviewer, or CEO so Paperclip wakes a named resolver. Match the interaction to the answer: use `request_confirmation` only for a real yes/no choice; use `ask_user_questions` when the resolver must supply a URL, identifier, reason, procedure, or other answer content. Accepting a confirmation cannot supply missing information. Do not default a routine implementation choice to the board, and do not leave a material proposal only in a comment. When a board-only proposal blocks progress, use the project's configured human-notification route once and record delivery on the source issue.
 
 Key shared semantics:
 
