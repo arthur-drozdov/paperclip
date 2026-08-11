@@ -64,6 +64,18 @@ board change completed merely because a wake was queued.
 
 Follow these steps every time you wake up:
 
+**Agent-addressed interaction fast path.** If the wake reason is
+`interaction_pending`, the wake payload contains an `interactionId`, and you
+are its `interactionTargetAgentId`, you are the resolver rather than the source
+issue executor. **Do not checkout, self-assign, reassign, or change the status
+of the source issue.** Read `GET /api/issues/{issueId}/interactions`, locate the
+named pending interaction, inspect only the context needed to answer it, and
+resolve it with the matching `accept`, `reject`, `respond`, or `verdicts`
+endpoint. The interaction's continuation policy wakes the source assignee.
+If you cannot resolve it within your remit, address a typed follow-up to the
+responsible manager or CEO; notify the human only when human authority or input
+is genuinely indispensable.
+
 **Scoped-wake fast path.** If `PAPERCLIP_TASK_ID` is set, if
 `PAPERCLIP_WAKE_PAYLOAD_JSON` names an issue, or if the user message includes a
 **"Paperclip Resume Delta"** or **"Paperclip Wake Payload"** section that names
@@ -97,7 +109,8 @@ Overrides and special cases:
 - **Blocked-task dedup:** before touching a `blocked` task, check the thread. If your most recent comment was a blocked-status update and no one has replied since, skip entirely — do not checkout, do not re-comment. Only re-engage on new context (comment, status change, event wake).
 - Nothing assigned and no valid mention handoff → exit the heartbeat.
 
-**Step 5 — Checkout.** You MUST checkout before doing any work. Include the run ID header:
+**Step 5 — Checkout.** Except for the agent-addressed interaction fast path
+above, you MUST checkout before doing any work. Include the run ID header:
 
 ```
 POST /api/issues/{issueId}/checkout
