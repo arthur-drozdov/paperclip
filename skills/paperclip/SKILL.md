@@ -160,6 +160,16 @@ If `currentParticipant` does not match you, do not try to advance the stage — 
 - Leave durable progress in comments, issue documents, or work products, then update the issue state/path to a clear final disposition before you exit.
 - Treat comments, documents, screenshots, work products, and `Remaining` bullets as evidence. They are not valid liveness paths by themselves.
 - Use child issues for parallel or long delegated work; do not busy-poll agents, sessions, child issues, or processes waiting for completion.
+- A Paperclip heartbeat is already the durable execution unit. Do not delegate
+  the current issue or this heartbeat procedure wholesale to an ephemeral
+  OpenClaw subagent, and do not call `sessions_yield` from a Paperclip run.
+  `sessions_yield` ends the current model turn; it does not by itself create a
+  Paperclip continuation, owner, blocker, or monitor. You may use an OpenClaw
+  subagent for bounded supporting research only while you continue owning the
+  heartbeat and record its final disposition yourself. For work that must
+  continue after this turn, create and assign a real Paperclip child issue,
+  link the dependency, and verify the resulting issue or run exists before
+  exiting.
 - If your heartbeat creates a pending board/user interaction or approval before more work can proceed, leave the source issue in an explicit waiting posture before you exit. Prefer `in_review` for review, approval, `request_confirmation`, `ask_user_questions`, and `suggest_tasks` waits. Use `blocked` with `blockedByIssueIds` when another issue is the blocker.
 - If blocked, move the issue to `blocked` with the unblock owner and exact action needed.
 - Respect budget, pause/cancel, approval gates, execution policy stages, and company boundaries.
