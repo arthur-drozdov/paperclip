@@ -71,7 +71,13 @@ issue executor. **Do not checkout, self-assign, reassign, or change the status
 of the source issue.** Read `GET /api/issues/{issueId}/interactions`, locate the
 named pending interaction, inspect only the context needed to answer it, and
 resolve it with the matching `accept`, `reject`, `respond`, or `verdicts`
-endpoint. The interaction's continuation policy wakes the source assignee.
+endpoint. For an addressed `request_confirmation` whose
+`effectiveResolverPolicy` is `board_or_agents`, accept with
+`POST /api/issues/{issueId}/interactions/{interactionId}/accept` and an empty
+JSON object (`{}`), or reject with the matching endpoint and its required
+reason. Do not confuse the checkbox-confirmation reference's board-oriented
+example with this agent-addressed path. The server records your run identity,
+and the interaction's continuation policy wakes the source assignee.
 If you cannot resolve it within your remit, address a typed follow-up to the
 responsible manager or CEO; notify the human only when human authority or input
 is genuinely indispensable.

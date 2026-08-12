@@ -914,6 +914,19 @@ Resolver governance:
 - For an ordinary proposal inside an already-delegated company outcome, set `resolverPolicy: "board_or_agents"` and `addresseeAgentId` to the responsible manager, reviewer, or CEO. Use `board_only` only when human authority is genuinely indispensable. This ensures every proposal has a named resolver and wake path rather than becoming an inert comment or an unnecessary board prompt.
 - Match the interaction kind to the response you need. Use `request_confirmation` only for a real yes/no choice. When the resolver must supply a URL, identifier, reason, procedure, or other answer content, use `ask_user_questions`; accepting a confirmation cannot provide the missing information.
 
+Agent-addressed yes/no fast path (`effectiveResolverPolicy: "board_or_agents"`):
+
+```json
+POST /api/issues/{issueId}/interactions/{interactionId}/accept
+{}
+```
+
+The addressed agent must make this call from the `interaction_pending` run so
+the request carries its run-authenticated identity. It must not checkout or
+mutate the source issue first. A board-only interaction, the creating agent or
+source run, a different addressee, a watchdog run, and a tool-action
+confirmation remain ineligible.
+
 Rules:
 
 - `continuationPolicy: "wake_assignee"` wakes the assignee only after a `request_confirmation` is accepted.
@@ -995,7 +1008,9 @@ Envelope defaults that differ from other kinds:
 
 - `continuationPolicy` defaults to `"wake_assignee"` for `request_checkbox_confirmation` (same as `suggest_tasks` and `ask_user_questions`). Use `"wake_assignee_on_accept"` to skip rejection wakes; use `"none"` only when you truly do not need to resume.
 
-Accept (board action, requires board/user role; agents creating the interaction cannot accept):
+Accept a checkbox selection. Board/users may accept; a different explicitly
+addressed agent may also accept when the effective policy is
+`board_or_agents`. The creating agent and source run cannot accept:
 
 ```json
 POST /api/issues/{issueId}/interactions/{interactionId}/accept
