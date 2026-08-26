@@ -1,9 +1,30 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@paperclipai/adapter-utils/execution-target", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, runAdapterExecutionTargetProcess: vi.fn() };
+});
 
 import { ensureRemoteOpenCodeModelConfiguredAndAvailable, execute } from "./execute.js";
+import { runAdapterExecutionTargetProcess } from "@paperclipai/adapter-utils/execution-target";
+
+const runProcessMock = vi.mocked(runAdapterExecutionTargetProcess);
+
+function probeResult(overrides: Record<string, unknown>) {
+  return {
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    stdout: "",
+    stderr: "",
+    pid: 123,
+    startedAt: new Date().toISOString(),
+    ...overrides,
+  } as never;
+}
 
 describe("ensureRemoteOpenCodeModelConfiguredAndAvailable", () => {
   afterEach(() => {
@@ -65,6 +86,19 @@ describe("ensureRemoteOpenCodeModelConfiguredAndAvailable", () => {
 });
 
 describe("opencode_local minimalEnvironment", () => {
+  // This suite runs a real fake-opencode child process, so it needs the real
+  // spawner rather than the file-level vi.mock used by the remote-probe suites.
+  beforeEach(async () => {
+    const actual = (await vi.importActual("@paperclipai/adapter-utils/execution-target")) as Record<
+      string,
+      unknown
+    >;
+    runProcessMock.mockImplementation(actual.runAdapterExecutionTargetProcess as never);
+  });
+  afterEach(() => {
+    runProcessMock.mockReset();
+  });
+
   it("removes ambient server authority while retaining run identity and configured safe env", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "paperclip-opencode-minimal-execute-"));
     const command = path.join(root, "fake-opencode.cjs");
@@ -213,5 +247,50 @@ describe("opencode_local minimalEnvironment", () => {
       }
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("ensureRemoteOpenCodeModelConfiguredAndAvailable — probe is non-fatal when it cannot run", () => {
+  const target = { kind: "remote", transport: "ssh" } as never;
+  const base = {
+    runId: "run-probe",
+    executionTarget: target,
+    command: "opencode",
+    cwd: "/tmp",
+    env: {} as Record<string, string>,
+    timeoutSec: 30,
+    graceSec: 5,
+  };
+
+  beforeEach(() => {
+    runProcessMock.mockReset();
+  });
+
+  it("proceeds when the remote probe exits non-zero (e.g. a transient `Unexpected error`)", async () => {
+    runProcessMock.mockResolvedValueOnce(probeResult({ exitCode: 1, stderr: "Unexpected error" }));
+    await expect(
+      ensureRemoteOpenCodeModelConfiguredAndAvailable({ ...base, model: "openai/gpt-5" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("proceeds when the remote probe times out", async () => {
+    runProcessMock.mockResolvedValueOnce(probeResult({ timedOut: true, exitCode: null }));
+    await expect(
+      ensureRemoteOpenCodeModelConfiguredAndAvailable({ ...base, model: "openai/gpt-5" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("proceeds when the remote probe returns no models", async () => {
+    runProcessMock.mockResolvedValueOnce(probeResult({ exitCode: 0, stdout: "" }));
+    await expect(
+      ensureRemoteOpenCodeModelConfiguredAndAvailable({ ...base, model: "openai/gpt-5" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still rejects when the probe succeeds but the configured model is absent (guard retained)", async () => {
+    runProcessMock.mockResolvedValueOnce(probeResult({ exitCode: 0, stdout: "openai/gpt-4.1\n" }));
+    await expect(
+      ensureRemoteOpenCodeModelConfiguredAndAvailable({ ...base, model: "openai/gpt-5" }),
+    ).rejects.toThrow("Configured OpenCode model is unavailable on the remote execution target");
   });
 });

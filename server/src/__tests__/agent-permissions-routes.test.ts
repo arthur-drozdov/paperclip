@@ -916,6 +916,7 @@ describe.sequential("agent permission routes", () => {
       expect.objectContaining({
         status: "idle",
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "agent-admin-user", applyExistingWithoutClaim: false } },
     );
     expect(mockAccessService.setPrincipalPermission).toHaveBeenCalledWith(
       companyId,
@@ -1048,6 +1049,7 @@ describe.sequential("agent permission routes", () => {
           },
         },
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
     );
   });
 
@@ -1110,6 +1112,7 @@ describe.sequential("agent permission routes", () => {
             },
           },
         }),
+        { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
       );
     } finally {
       unregisterServerAdapter("failing_profile_discovery");
@@ -1148,6 +1151,7 @@ describe.sequential("agent permission routes", () => {
           model: DEFAULT_OPENCODE_LOCAL_MODEL,
         }),
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
     );
   });
 
@@ -1185,6 +1189,7 @@ describe.sequential("agent permission routes", () => {
           model: "anthropic/claude-sonnet-4-5",
         }),
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
     );
   });
 
@@ -1226,6 +1231,7 @@ describe.sequential("agent permission routes", () => {
           },
         },
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
     );
   });
 
@@ -1449,6 +1455,7 @@ describe.sequential("agent permission routes", () => {
       expect.objectContaining({
         defaultEnvironmentId: environmentId,
       }),
+      { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
     );
   });
 
@@ -1534,6 +1541,7 @@ describe.sequential("agent permission routes", () => {
           adapterType: adapterCase.adapterType,
           defaultEnvironmentId: environmentId,
         }),
+        { claudeLogin: { storedSessionId: null, ownerUserId: "board-user", applyExistingWithoutClaim: false } },
       );
     });
   }

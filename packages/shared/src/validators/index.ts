@@ -427,6 +427,10 @@ export {
   addIssueCommentSchema,
   issueThreadInteractionStatusSchema,
   issueThreadInteractionKindSchema,
+  issueThreadInteractionCanonicalResolverPolicySchema,
+  issueThreadInteractionResolverPolicySchema,
+  issueThreadInteractionResolverPolicyProvenanceSchema,
+  issueThreadInteractionEffectiveResolverPolicySourceSchema,
   issueThreadInteractionContinuationPolicySchema,
   suggestedTaskDraftSchema,
   suggestTasksPayloadSchema,
@@ -565,7 +569,11 @@ export {
 } from "./execution-workspace.js";
 
 export {
+  normalizedWorkspaceFileAvailabilityQuerySchema,
   resolvedWorkspaceResourceSchema,
+  workspaceFileAvailabilityRequestSchema,
+  workspaceFileAvailabilityResponseSchema,
+  workspaceFileAvailabilityResultSchema,
   workspaceFileListModeSchema,
   workspaceFileListQuerySchema,
   workspaceFileContentSchema,
@@ -575,6 +583,7 @@ export {
   workspaceFileResourceQuerySchema,
   workspaceFileSelectorSchema,
   workspaceFileWorkspaceKindSchema,
+  type WorkspaceFileAvailabilityRequestInput,
   type WorkspaceFileListQuery,
   type WorkspaceFileResourceQuery,
 } from "./workspace-file-resource.js";
@@ -585,6 +594,11 @@ export {
   type CreateGoal,
   type UpdateGoal,
 } from "./goal.js";
+
+export {
+  applyOnboardingSeedSchema,
+  type ApplyOnboardingSeed,
+} from "./onboarding-seed.js";
 
 export {
   createApprovalSchema,
@@ -749,6 +763,7 @@ export {
   pluginWebhookDeclarationSchema,
   pluginToolDeclarationSchema,
   pluginEnvironmentDriverDeclarationSchema,
+  sandboxProviderCapabilitiesSchema,
   pluginUiSlotDeclarationSchema,
   pluginLauncherActionDeclarationSchema,
   pluginLauncherRenderDeclarationSchema,
@@ -770,6 +785,7 @@ export {
   type PluginWebhookDeclarationInput,
   type PluginToolDeclarationInput,
   type PluginEnvironmentDriverDeclarationInput,
+  type SandboxProviderCapabilitiesInput,
   type PluginUiSlotDeclarationInput,
   type PluginLauncherActionDeclarationInput,
   type PluginLauncherRenderDeclarationInput,
