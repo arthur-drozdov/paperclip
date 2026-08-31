@@ -66,6 +66,7 @@ import {
   updateDocumentAnnotationThreadSchema,
   upsertIssueDocumentSchema,
   updateIssueSchema,
+  blockedJustificationRefinement,
   isClosedIsolatedExecutionWorkspace,
   isUuidLike,
   normalizeIssueIdentifier as normalizeIssueReferenceIdentifier,
@@ -247,9 +248,11 @@ import {
 } from "../services/cross-issue-influence-limit.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
-const updateIssueRouteSchema = updateIssueSchema.extend({
-  interrupt: z.boolean().optional(),
-});
+const updateIssueRouteSchema = updateIssueSchema
+  .extend({
+    interrupt: z.boolean().optional(),
+  })
+  .superRefine(blockedJustificationRefinement);
 
 function prefersMinimalIssueUpdateResponse(req: Request) {
   return (req.get("Prefer") ?? "")

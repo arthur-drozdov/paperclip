@@ -3187,6 +3187,7 @@ const issueListSelect = {
   executionWorkspaceSettings: sql<null>`null`,
   sourceTrust: issues.sourceTrust,
   unblockDescriptor: issues.unblockDescriptor,
+  externalBlocker: issues.externalBlocker,
   blockedTransitionAt: issues.blockedTransitionAt,
   blockedOwnerNotifiedAt: issues.blockedOwnerNotifiedAt,
   startedAt: issues.startedAt,
@@ -7190,6 +7191,14 @@ export function issueService(db: Db) {
 
         const values = {
           ...issueData,
+          ...(issueData.externalBlocker
+            ? {
+                externalBlocker: {
+                  ...issueData.externalBlocker,
+                  since: issueData.externalBlocker.since ?? new Date().toISOString(),
+                },
+              }
+            : {}),
           responsibleUserId,
           requestDepth: clampIssueRequestDepth(issueData.requestDepth),
           originKind: issueData.originKind ?? "manual",
@@ -7580,6 +7589,7 @@ export function issueService(db: Db) {
         patch.blockedOwnerNotifiedAt = null;
       } else if (existing.status === "blocked" && issueData.status && issueData.status !== "blocked") {
         patch.unblockDescriptor = null;
+        patch.externalBlocker = null;
         patch.blockedTransitionAt = null;
         patch.blockedOwnerNotifiedAt = null;
       }
