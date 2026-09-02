@@ -2167,9 +2167,9 @@ function ConfigurationTab({
       : taskAssignSource === "agent_creator"
         ? "Enabled automatically while this agent can create new agents."
         : taskAssignSource === "explicit_grant"
-          ? "Enabled via explicit company permission grant."
+          ? "Enabled via explicit organization permission grant."
           : taskAssignSource === "simple_default"
-            ? "Enabled by simple company-wide task assignment defaults."
+            ? "Enabled by simple organization-wide task assignment defaults."
             : "Disabled unless explicitly granted.";
 
   return (
@@ -2246,7 +2246,7 @@ function ConfigurationTab({
             <div className="space-y-1">
               <div>Can create/import skills</div>
               <p className="text-xs text-muted-foreground">
-                Lets this agent install, import, create, and scan company skills without creating agents.
+                Lets this agent install, import, create, and scan organization skills without creating agents.
               </p>
             </div>
             <ToggleSwitch
@@ -2455,7 +2455,7 @@ export function PromptsTab({
 
   const uploadMarkdownImage = useMutation({
     mutationFn: async ({ file, namespace }: { file: File; namespace: string }) => {
-      if (!selectedCompanyId) throw new Error("Select a company to upload images");
+      if (!selectedCompanyId) throw new Error("Select an organization to upload images");
       return assetsApi.uploadImage(selectedCompanyId, file, namespace);
     },
   });
