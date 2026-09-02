@@ -267,6 +267,7 @@ import {
 } from "../log-redaction.js";
 import { redactEventPayload, redactSensitiveText } from "../redaction.js";
 import { createRunSecretRedactionRegistry } from "./run-secret-redaction.js";
+import { evaluateHeartbeatDispatchBlackout } from "./heartbeat-dispatch-blackout.js";
 import {
   hasSessionCompactionThresholds,
   resolveSessionCompactionPolicy,
@@ -14020,6 +14021,16 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         return [];
       }
       const policy = parseHeartbeatPolicy(agent);
+      const dispatchBlackout = evaluateHeartbeatDispatchBlackout(
+        parseObject(agent.runtimeConfig).heartbeat,
+      );
+      if (dispatchBlackout.blocked) {
+        logger.debug(
+          { agentId, blackout: dispatchBlackout.label },
+          "queued heartbeat dispatch deferred by agent work schedule",
+        );
+        return [];
+      }
       const runningCount = await countRunningRunsForAgent(agentId);
       const availableSlots = Math.max(0, policy.maxConcurrentRuns - runningCount);
       if (availableSlots <= 0) return [];

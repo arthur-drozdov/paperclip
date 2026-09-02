@@ -60,6 +60,30 @@ In agent runtime settings, configure heartbeat policy:
 - `wakeOnAssignment`: wake when assigned work
 - `wakeOnOnDemand`: allow ping-style on-demand wakeups
 - `wakeOnAutomation`: allow system automation wakeups
+- `dispatchBlackouts`: optional local-time windows in which new runs remain
+  queued instead of starting. Each entry accepts an IANA `timeZone`, JavaScript
+  weekday numbers (`0` Sunday through `6` Saturday), and `start`/`end` times in
+  `HH:mm` form. Queued work resumes on the first scheduler tick after the
+  window ends; work that was already running is not interrupted.
+
+For example, this defers weekday dispatch from 14:00 through 17:59 in
+Singapore:
+
+```json
+{
+  "heartbeat": {
+    "dispatchBlackouts": [
+      {
+        "label": "Singapore peak hours",
+        "timeZone": "Asia/Singapore",
+        "daysOfWeek": [1, 2, 3, 4, 5],
+        "start": "14:00",
+        "end": "18:00"
+      }
+    ]
+  }
+}
+```
 
 ## 3.3 Working directory and execution limits
 

@@ -769,6 +769,82 @@ describeEmbeddedPostgres("heartbeat dependency-aware queued run selection", () =
     }
   }, 40_000);
 
+  it("keeps a wake queued until its dispatch blackout ends", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+      defaultResponsibleUserId: "responsible-user",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "PeakHoursLeader",
+      role: "manager",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        heartbeat: {
+          wakeOnDemand: true,
+          maxConcurrentRuns: 1,
+          dispatchBlackouts: [{
+            timeZone: "UTC",
+            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+            start: "00:00",
+            end: "24:00",
+          }],
+        },
+      },
+      permissions: {},
+    });
+
+    const queued = await heartbeat.wakeup(agentId, {
+      source: "on_demand",
+      triggerDetail: "system",
+      reason: "test_dispatch_blackout",
+      requestedByActorType: "system",
+      requestedByActorId: "test",
+    });
+    expect(queued).not.toBeNull();
+
+    const blockedRun = await db
+      .select({ status: heartbeatRuns.status })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, queued!.id))
+      .then((rows) => rows[0] ?? null);
+    expect(blockedRun?.status).toBe("queued");
+    expect(mockAdapterExecute).not.toHaveBeenCalled();
+
+    await db
+      .update(agents)
+      .set({
+        runtimeConfig: {
+          heartbeat: {
+            wakeOnDemand: true,
+            maxConcurrentRuns: 1,
+          },
+        },
+      })
+      .where(eq(agents.id, agentId));
+    await heartbeat.resumeQueuedRuns();
+
+    const completed = await waitForCondition(async () => {
+      const run = await db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, queued!.id))
+        .then((rows) => rows[0] ?? null);
+      return run?.status === "succeeded";
+    }, 10_000);
+    expect(completed).toBe(true);
+    expect(mockAdapterExecute).toHaveBeenCalledTimes(1);
+  }, 20_000);
+
   it("cancels stale queued runs when issue blockers are still unresolved", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
