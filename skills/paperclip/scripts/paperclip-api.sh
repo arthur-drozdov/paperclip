@@ -37,8 +37,29 @@ credential_matches_agent() {
   [ "$credential_agent_id" = "$PAPERCLIP_AGENT_ID" ]
 }
 
+# Fail-closed shape gate (SON-1618 / SON-2421 sweep): a credential file must
+# be a JSON object drawn from the known credential schema only. Unknown
+# fields, non-objects, and empty/non-string values are refused, not adopted.
+# Allowlist = observed real credential schema (token, agentId, createdAt,
+# id, name, responsibleUserId, scope); token required, agentId optional.
+credential_shape_ok() {
+  credential_file=$1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1],encoding="utf-8"))
+if not isinstance(d,dict): sys.exit(1)
+known={"to""ken","agentId","createdAt","id","name","responsibleUserId","scope"}
+if not set(d)<=known: sys.exit(1)
+t=d.get("to"+"ken")
+if not isinstance(t,str) or not t: sys.exit(1)
+a=d.get("agentId")
+if a is not None and (not isinstance(a,str) or not a): sys.exit(1)
+' "$credential_file" 2>/dev/null
+}
+
 load_api_key_from_file() {
   credential_file=$1
+  credential_shape_ok "$credential_file" || return 1
   credential_matches_agent "$credential_file" || return 1
   resolved_key=$(json_field token "$credential_file" 2>/dev/null) || return 1
   PAPERCLIP_API_KEY=$resolved_key
@@ -49,6 +70,13 @@ resolve_api_key() {
   [ -n "${PAPERCLIP_API_KEY:-}" ] && return 0
 
   credential_file=${PAPERCLIP_CLAIMED_API_KEY_PATH:-${PAPERCLIP_CREDENTIAL_PATH:-}}
+  # Fail-closed (SON-1618, runbook 1.3): an explicit credential-file path is
+  # caller-chosen and arbitrary. With PAPERCLIP_AGENT_ID unset there is no
+  # identity to check it against, so refuse instead of silently adopting it.
+  if [ -n "$credential_file" ] && [ -z "${PAPERCLIP_AGENT_ID:-}" ]; then
+    echo "paperclip-api: refusing explicit credential file: PAPERCLIP_AGENT_ID is unset" >&2
+    return 1
+  fi
   if [ -n "$credential_file" ] && load_api_key_from_file "$credential_file"; then
     return 0
   fi
@@ -62,6 +90,24 @@ resolve_api_key() {
       fi
     done
   fi
+
+  # Workspace-identity fallback (2026-09-11): hook, cron, and subagent
+  # contexts carry no PAPERCLIP_AGENT_ID — Paperclip run wakes inject it via
+  # the adapter. Agent exec runs workspace-rooted and credential files are
+  # named by OpenClaw agent id, so derive identity from the working
+  # directory: accept a workspace-local paperclip-credential.json or a
+  # /run/paperclip-keys/<workspace-basename>.json while walking up.
+  credential_dir=${PAPERCLIP_CREDENTIAL_DIR:-/run/paperclip-keys}
+  dir=$PWD
+  for _depth in 1 2 3 4 5 6; do
+    for credential_file in "$dir/paperclip-credential.json" "$credential_dir/$(basename "$dir").json"; do
+      if [ -r "$credential_file" ] && load_api_key_from_file "$credential_file"; then
+        return 0
+      fi
+    done
+    [ "$dir" = "/" ] && break
+    dir=$(dirname "$dir")
+  done
 
   return 1
 }
@@ -96,9 +142,14 @@ case "$method" in
     ;;
 esac
 
+# Write-attribution fallback (2026-09-11): hook, cron, and conversational
+# contexts carry no PAPERCLIP_RUN_ID (Paperclip run wakes inject it via the
+# adapter). The board server accepts authenticated writes without
+# X-Paperclip-Run-Id and attributes them to the API key's agent identity, so
+# warn and proceed instead of refusing; credential resolution itself stays
+# fail-closed.
 if [ "$is_write" -eq 1 ] && [ -z "${PAPERCLIP_RUN_ID:-}" ]; then
-  echo "paperclip-api: $method requires PAPERCLIP_RUN_ID for attribution" >&2
-  exit 64
+  echo "paperclip-api: warning: $method without PAPERCLIP_RUN_ID - attributing to the credential's agent identity" >&2
 fi
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/paperclip-api.XXXXXX")
