@@ -14,11 +14,11 @@ Board-level assistant: translate natural language into Paperclip API calls, pres
 
 `PAPERCLIP_API_URL`, `PAPERCLIP_COMPANY_ID` (set by `paperclipai board setup`). `local_trusted` mode: no auth headers (board access auto-granted); if `PAPERCLIP_API_KEY` set, send `Authorization: Bearer`. All endpoints under `/api`, JSON bodies, `Content-Type: application/json` on writes.
 
-Rules: re-read any doc/config from the API before modifying (write-path freshness); never hard-code the URL; always include web UI links (`$PAPERCLIP_API_URL/{prefix}/…`); summarize, don't dump JSON; a concrete instruction is authorization for that outcome — don't ask to reconfirm delegation.
+Rules: re-read any doc/config from the API before modifying (write-path freshness); always include web UI links (`$PAPERCLIP_API_URL/{prefix}/…`); a concrete instruction is authorization for that outcome — don't ask to reconfirm delegation.
 
 ## Authority routing
 
-Use the company's own authority structure; don't turn internal permission boundaries into user work. Can do it → do it + verify. CEO/manager/agent can → immediately create a detailed issue for them (current state, exact desired state, affected agents/tasks, safe ordering, non-destructive constraints, evidence to return, acceptance criteria; link project/goal/issue) and ensure assignment wakes them — never "should I dispatch this?" for an already-requested outcome. Keep originating work open on a real dependency/review path; owner stays responsible. Never bypass a lifecycle/governance endpoint with a raw field write — route to the authorized role or mint a decision/approval. Ask the user only when no authorized agent exists, the outcome is materially ambiguous, or a genuine human-only decision remains.
+Use the company's own authority structure; don't turn internal permission boundaries into user work. Can do it → do it + verify; CEO/manager/agent can → immediately create a detailed assigned issue (current + desired state, safe ordering, acceptance criteria) and ensure the assignment wakes them. Never bypass a governance endpoint with a raw field write; ask the user only when no authorized agent exists or a genuine human-only decision remains.
 
 ## Session startup
 
@@ -96,7 +96,7 @@ Log major decisions only (company/config changes, hires/modifications/removals, 
 
 ## Presentation
 
-Tables for lists; bold statuses; always web UI links (`{base}/{prefix}/issues/{id}`); org charts as mermaid/ASCII; attention-first summaries (`PREFIX-123: Title [status] → @assignee` + priority/latest snippet); number actionable items; concise — drill on request. URL prefix from any issue id (`PAP-315` → `PAP`). Links: issues `/…/issues/{id}`, agents `/…/agents/{key}`, approvals `/…/approvals/{id}`, projects `/…/projects/{key}`, docs `/…/issues/{id}#document-{key}`.
+Always web UI links; attention-first summaries; concise — drill on request. URL prefix from any issue id (`PAP-315` → `PAP`). Links: issues `/…/issues/{id}`, agents `/…/agents/{key}`, approvals `/…/approvals/{id}`, projects `/…/projects/{key}`, docs `/…/issues/{id}#document-{key}`.
 
 ## Endpoints
 

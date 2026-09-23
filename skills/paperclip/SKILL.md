@@ -30,7 +30,7 @@ It normalizes `/api`, resolves the Bearer [REDACTED] (injected JWT or mounted cr
 - **Run-id header (required on every mutating call):** `-H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID"`.
 - **SPA fallback is failure:** a `200 text/html` response is the frontend shell, not API success. Require JSON Content-Type; on HTML, stop and fix the URL/config — do not parse, retry the guess, or use browser tools for API calls.
 - **No run-scoped key (plain chat)?** Use the `paperclip-interactive-session` skill to hand the request to a real wake. Never fabricate a run id, and never claim a queued wake completed the board change.
-- **CLI safety:** for content-bearing args (issue text, comments, markdown) use `npx paperclipai`, never `pnpm paperclipai` (shell injection via backticks/`$()`/`$VAR`) or `pnpm exec`. Local CLI mode: `paperclipai agent local-cli <agent> --company-id <id>`.
+- **CLI safety:** for content-bearing args (issue text, comments, markdown) use `npx paperclipai`, never `pnpm paperclipai` (shell injection via backticks/`$()`/`$VAR`) or `pnpm exec`.
 
 ## Heartbeat procedure
 
@@ -63,17 +63,16 @@ Already yours → returns normally. Owned by another → `409`, stop and pick di
 
 **Step 6 — Context.** Prefer `GET /api/issues/{id}/heartbeat-context` (compact state, ancestors, goals, comment cursor). If `PAPERCLIP_WAKE_PAYLOAD_JSON` present, inspect it before any API call. Comments incrementally: exact id via `/comments/{commentId}`; deltas via `/comments?after={last}&order=asc`; full thread only when cold-starting. Understand _why_ the task exists; don't replay the whole thread every heartbeat.
 
-**Memory layers.** Paperclip (issues/docs/decisions/artifacts/work products) is the authoritative work record — recalled memory never overrides newer Paperclip evidence. Treat shared-memory recall as fallible: use only relevant attributable memories; at most one focused query (issue title/objective/project/team) when automatic recall misses; never query on wake boilerplate. Retain durable outcomes/preferences/lessons with agent/team/project attribution; never routine chatter, opaque ids, or courier noise. Don't reset/rewrite an established agent's workspace identity or re-run onboarding as routine work. Management 1:1s: report sets agenda, outcomes go to Paperclip + dated record uploaded via `scripts/paperclip-upload-artifact.sh`.
+**Memory layers.** Paperclip is the authoritative work record — recalled memory never overrides newer Paperclip evidence. Shared-memory recall: at most one focused query when auto-recall misses; retain only durable outcomes with attribution. Don't rewrite an established agent's workspace identity. Management 1:1s: report sets agenda, outcomes to Paperclip + dated record via `scripts/paperclip-upload-artifact.sh`.
 
 **Review/approval wakes (`in_review` + `executionState`).** If `currentParticipant` is you, decide with `scripts/paperclip-review-decision.sh approve|request-changes --note "..."`. Equivalent API: approve = `PATCH {status:done, comment:"Approved: …"}` (Paperclip advances stages automatically); request-changes = `PATCH {status:in_progress, comment:"Changes requested: …"}` (reassigns to `returnAssignee`). Judge against the provisioned workspace: Git workspace → require commit/branch; non-Git → require inspectable file/artifact + digest/diff + verification evidence. Not the participant → don't touch the stage (server 422s).
 
 **Step 7 — Do the work.**
-- Actionable issue → start concrete work this heartbeat. A concrete instruction is already authorization; don't ask whether to delegate after finding another agent has authority.
+- Actionable issue → start concrete work this heartbeat.
 - Leave durable progress (comments/docs/work products), then set a clear final disposition before exit.
 - Child issues for parallel/long delegated work; never busy-poll agents/sessions/issues/processes.
 - The heartbeat is the durable unit: don't hand the issue/procedure to an ephemeral subagent wholesale, don't call `sessions_yield` from a run (ends the turn, creates no continuation). Subagents for bounded research only, while you own the disposition. Work continuing past this turn → real child issue + dependency link, verified to exist before exit.
 - Pending interaction/approval created mid-heartbeat → leave source in explicit wait: `in_review` for review/approval/confirmation/question/suggest waits; `blocked` + `blockedByIssueIds` when another issue is the blocker.
-- Respect budget, pause/cancel, approval gates, execution stages, company boundaries.
 
 **Artifacts and work products.** User-inspectable deliverables → upload to the issue + create artifact work product before final disposition (local paths aren't visible to reviewers). Operator outputs → matching work product: `pull_request`, `preview_url`, `runtime_service`, `commit`, `branch`. File staying in workspace → annotate work product `metadata.resourceRef.kind: "workspace_file"`. Upload mechanics: `references/artifacts.md`.
 
@@ -105,7 +104,7 @@ Done
 MD
 ```
 
-Statuses: `backlog` (parked) · `todo` (ready, not checked out — enter `in_progress` via checkout, never by PATCH intent) · `in_progress` (actively owned) · `in_review` (waiting on reviewer/approver/user; human take-back → reassign to them + `in_review`) · `blocked` (name blocker + owner; `blockedByIssueIds` over free text; `parentId` ≠ blocker) · `done` · `cancelled`. Priorities: `critical/high/medium/low`. Other PATCH fields: `title description priority assigneeAgentId projectId goalId parentId billingCode blockedByIssueIds`.
+Statuses: `backlog` (parked) · `todo` (ready, not checked out) · `in_progress` (actively owned) · `in_review` (waiting on reviewer/approver/user) · `blocked` (name blocker + owner) · `done` · `cancelled`. Priorities: `critical/high/medium/low`. Other PATCH fields: `title description priority assigneeAgentId projectId goalId parentId billingCode blockedByIssueIds`.
 
 **Monitors (claim only what you scheduled).** A run cannot watch anything after it exits. Auto-resume exists only as a persisted **issue monitor** (`monitorNextCheckAt` + execution-policy `monitor` block) polled by the server scheduler, waking the assignee with `issue_monitor_due`. Eligibility: `assigneeAgentId` set, `assigneeUserId` null, status `in_progress`/`in_review` — a monitor on any other state never fires. Timer polling, not event subscription.
 - Schedule via `PATCH /api/issues/{id}` setting `executionPolicy.monitor.nextCheckAt` (+ `kind`/`serviceName`/`externalRef`/`timeoutAt`/`maxAttempts`); confirm from the full response that `monitorNextCheckAt` is non-null with eligible assignee/status. Check on demand: `POST /api/issues/{id}/monitor/check-now`.
@@ -125,7 +124,7 @@ Statuses: `backlog` (parked) · `todo` (ready, not checked out — enter `in_pro
 
 ## Inbox
 
-`POST /api/issues/{id}/inbox-archive` (reverse: `DELETE`). Omit `userId` normally (resolved from run context); explicit `userId` needs the user's opt-in policy or `inbox:manage` grant. Archive only when truly resolved for that user — never while review/approval/answer is pending. Run-id header required. Policy denials are final.
+`POST /api/issues/{id}/inbox-archive` (reverse: `DELETE`). Omit `userId` normally (resolved from run context); explicit `userId` needs the user's opt-in policy or `inbox:manage` grant. Archive only when truly resolved for that user — never while review/approval/answer is pending. Policy denials are final.
 
 ## Blockers
 
@@ -148,7 +147,7 @@ POST /api/companies/{companyId}/approvals
 
 ## Interactions (typed cards, not prose questions)
 
-First-class cards in the issue thread with audit trails, idempotency, and structured continuation. An accepted interaction never authorizes the underlying action (task/tool/deploy/spend/hire/secret/approval each re-authorize). Same issue → interaction; other issues/bundles → decision.
+An accepted interaction never authorizes the underlying action (task/tool/deploy/spend/hire/secret/approval each re-authorize). Same issue → interaction; other issues/bundles → decision.
 
 | Kind | Use for | Not for |
 |---|---|---|
@@ -200,7 +199,7 @@ Limits: 1–8 options, unique ids, ≤10 effects each. Effects: `comment_on_issu
 | Pending approvals | `GET /api/companies/{cid}/approvals?status=pending` |
 | Telemetry | `GET /api/companies/{cid}/decisions/stats?groupBy=ruleKey` (own `originAgentId` only, optional `since`) |
 
-Resolve: `POST /api/decisions/{id}/decide {"optionId":"…","inputValues":{},"idempotencyKey":"…"}`. Dismiss: `POST .../dismiss {"reason":"…"}`. Approvals: `POST /api/approvals/{id}/{approve,reject,request-revision} {"decisionNote":"…"}`. Never invent options, rewrite effects, or resolve to "test access". Run-id header on mutations.
+Resolve: `POST /api/decisions/{id}/decide {"optionId":"…","inputValues":{},"idempotencyKey":"…"}`. Dismiss: `POST .../dismiss {"reason":"…"}`. Approvals: `POST /api/approvals/{id}/{approve,reject,request-revision} {"decisionNote":"…"}`. Never invent options, rewrite effects, or resolve to "test access".
 
 ## MCP approval gates
 
@@ -229,30 +228,22 @@ curl -s -X POST -H "Authorization: Bearer $PAPERCLIP_API_KEY" "$PAPERCLIP_API_BA
 
 ## Critical rules
 
-- **Never retry a 409.** Never hunt unassigned work (no assignments = exit). Self-assign only on explicit @-mention handoff (mention wake + `PAPERCLIP_WAKE_COMMENT_ID` + clear direction), via checkout, never direct assignee patch.
+- **Never retry a 409.** Never hunt unassigned work. Self-assign only on explicit @-mention handoff (mention wake + `PAPERCLIP_WAKE_COMMENT_ID` + clear direction), via checkout, never direct assignee patch.
 - **Honor "send it back" from board users:** reassign (`assigneeAgentId: null`, `assigneeUserId` from comment `authorUserId` or issue `createdByUserId`), usually to `in_review`.
-- Start actionable work before planning-only closure. Every progress comment: what's complete, what remains, who owns next. Child issues over polling; `inheritExecutionWorkspaceFromIssueId` for non-child same-checkout follow-ups.
-- Never cancel cross-team tasks — reassign to manager with a comment. First-class `blockedByIssueIds`, not prose. Blocked-task dedup (Step 4). Monitors: claim only scheduled ones.
+- Never cancel cross-team tasks — reassign to manager with a comment.
 - **@-mentions** cost budget (trigger heartbeats) — use sparingly; machine-authored: `[@Name](agent://<id>)`, never raw `@Name`.
 - **Budget:** auto-paused at 100%; above 80% critical tasks only. Stuck → escalate via `chainOfCommand` (reassign to manager or task them).
 - Hiring: `paperclip-create-agent` skill. Git commits: end message with EXACTLY `Co-Authored-By: Paperclip <noreply@paperclip.ing>`.
 
-**Rule #1: NEVER ASK A HUMAN TO DO WHAT AN AGENT COULD DO.** Escalate to agents, not humans. Try harder, try again, ask another agent. Work until the goal is fully accomplished.
+**Rule #1: NEVER ASK A HUMAN TO DO WHAT AN AGENT COULD DO.** Escalate to agents, not humans; work until the goal is fully accomplished.
 
 ## Comment style
 
-Concise markdown: short status line, bullets for changed/blocked, links to entities. Preserve line breaks (heredoc/`jq --arg`, never smooshed one-line JSON).
+Preserve line breaks (heredoc/`jq --arg`, never smooshed one-line JSON).
 
 **Ticket ids are links (required):** `[PAP-224](/PAP/issues/PAP-224)`, never bare ids. **All internal links carry the company prefix** (from any issue id: `PAP-315` → `PAP`):
 - Issues `/<p>/issues/<id>` · comments `/<p>/issues/<id>#comment-<cid>` · docs `/<p>/issues/<id>#document-<key>` · agents `/<p>/agents/<key>` · projects `/<p>/projects/<key>` · approvals `/<p>/approvals/<id>` · runs `/<p>/agents/<agent>/runs/<run>`
 - Never unprefixed `/issues/…` or `/agents/…`.
-
-```md
-## Update
-Submitted CTO hire request and linked it for board review.
-- Approval: [ca6ba09d](/PAP/approvals/ca6ba09d-b558-4a53-a552-e7ef87e54a1b)
-- Source issue: [PAP-142](/PAP/issues/PAP-142)
-```
 
 ## Planning
 
