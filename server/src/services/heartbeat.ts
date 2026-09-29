@@ -84,6 +84,7 @@ export { scrubGitCredentialText };
 import { publishLiveEvent } from "./live-events.js";
 import { normalizeResponsibleUserDenialCode } from "./responsible-user-denial-run-outcomes.js";
 import { getRunLogStore, type RunLogHandle } from "./run-log-store.js";
+import { nextHeartbeatRunEventSeq } from "./run-event-seq.js";
 import { getServerAdapter, listAdapterModelProfiles, runningProcesses } from "../adapters/index.js";
 import type {
   AdapterExecutionResult,
@@ -9932,13 +9933,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     }
   }
 
-  async function nextRunEventSeq(runId: string) {
-    const [row] = await db
-      .select({ maxSeq: sql<number | null>`max(${heartbeatRunEvents.seq})` })
-      .from(heartbeatRunEvents)
-      .where(eq(heartbeatRunEvents.runId, runId));
-    return Number(row?.maxSeq ?? 0) + 1;
-  }
+  const nextRunEventSeq = (runId: string) => nextHeartbeatRunEventSeq(db, runId);
 
   async function persistRunProcessMetadata(
     runId: string,
@@ -15735,6 +15730,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       });
 
       const currentRun = run;
+      seq = await nextRunEventSeq(currentRun.id);
       await appendRunEvent(currentRun, seq++, {
         eventType: "lifecycle",
         stream: "system",
