@@ -312,7 +312,7 @@ describe("Sidebar", () => {
     });
   });
 
-  it("shows Status directly below Decisions in primary navigation", async () => {
+  it("shows Status directly below Attention in primary navigation", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({
       enableDecisions: true,
       enableStatusCards: true,
@@ -320,8 +320,8 @@ describe("Sidebar", () => {
     const root = await renderSidebar();
 
     const primaryNavLinks = [...container.querySelectorAll("nav > div:first-child a")];
-    const decisionsLink = primaryNavLinks.find(
-      (anchor) => anchor.textContent?.trim() === "Decisions",
+    const attentionLink = primaryNavLinks.find(
+      (anchor) => anchor.textContent?.trim().startsWith("Attention"),
     );
     const statusLink = primaryNavLinks.find((anchor) => anchor.getAttribute("href") === "/status");
 
@@ -329,7 +329,46 @@ describe("Sidebar", () => {
     expect(statusLink?.textContent).toContain("beta");
     expect(statusLink?.textContent).not.toContain("exp");
     expect(statusLink?.textContent).not.toContain("cards");
-    expect(primaryNavLinks.indexOf(statusLink!)).toBe(primaryNavLinks.indexOf(decisionsLink!) + 1);
+    expect(primaryNavLinks.indexOf(statusLink!)).toBe(primaryNavLinks.indexOf(attentionLink!) + 1);
+
+    flushSync(() => {
+      root.unmount();
+    });
+  });
+
+  it("shows running and queued work separately instead of one combined live count", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableDecisions: true });
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
+      { id: "run-1", status: "running" },
+      { id: "run-2", status: "running" },
+      { id: "run-3", status: "queued" },
+    ]);
+    const root = await renderSidebar();
+
+    const dashboardLink = [...container.querySelectorAll("nav a")]
+      .find((anchor) => anchor.getAttribute("href") === "/dashboard");
+    const attentionLink = [...container.querySelectorAll("nav a")]
+      .find((anchor) => anchor.getAttribute("href") === "/decisions");
+
+    expect(dashboardLink?.textContent).toContain("2 running, 1 queued");
+    expect(attentionLink?.textContent).toContain("Attention");
+    expect(attentionLink?.textContent).not.toContain("Decisions");
+
+    flushSync(() => {
+      root.unmount();
+    });
+  });
+
+  it("describes the attention badge as new or due work rather than formal decisions", async () => {
+    mockSidebar.collapsed = true;
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableDecisions: true });
+    mockAttentionApi.list.mockResolvedValue({ items: [], deskBadgeCount: 52 });
+    const root = await renderSidebar();
+
+    const attentionLink = [...container.querySelectorAll("nav a")]
+      .find((anchor) => anchor.getAttribute("href") === "/decisions");
+
+    expect(attentionLink?.getAttribute("aria-label")).toBe("Attention, 52 new or due today");
 
     flushSync(() => {
       root.unmount();
@@ -352,9 +391,9 @@ describe("Sidebar", () => {
 
     const sections = [...container.querySelectorAll("nav > div")];
     const workSection = sections.find((section) => section.textContent?.startsWith("Work"));
-    const companySection = sections.find((section) => section.textContent?.startsWith("Company"));
+    const organizationSection = sections.find((section) => section.textContent?.startsWith("Organization"));
     expect(workSection?.textContent).toContain("Skills");
-    expect(companySection?.textContent).not.toContain("Skills");
+    expect(organizationSection?.textContent).not.toContain("Skills");
 
     flushSync(() => {
       root.unmount();
@@ -405,15 +444,15 @@ describe("Sidebar", () => {
     });
   });
 
-  it("places Timeline in the Company section", async () => {
+  it("places Timeline in the Organization section", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
     const root = await renderSidebar();
 
     const sections = [...container.querySelectorAll("nav > div")];
     const workSection = sections.find((section) => section.textContent?.startsWith("Work"));
-    const companySection = sections.find((section) => section.textContent?.startsWith("Company"));
+    const organizationSection = sections.find((section) => section.textContent?.startsWith("Organization"));
     expect(workSection?.textContent).not.toContain("Timeline");
-    expect(companySection?.textContent).toContain("Timeline");
+    expect(organizationSection?.textContent).toContain("Timeline");
 
     const timelineLink = [...container.querySelectorAll("a")].find((anchor) => anchor.textContent === "Timeline");
     expect(timelineLink?.getAttribute("href")).toBe("/timeline");

@@ -160,4 +160,19 @@ describe("SidebarNavItem", () => {
 
     expect(link().getAttribute("aria-label")).toBe("Dashboard, 3 live");
   });
+
+  it("uses the queued/running breakdown in the rail aria-label", () => {
+    sidebarState.collapsed = true;
+    render(
+      <SidebarNavItem
+        to="/dashboard"
+        label="Dashboard"
+        icon={Inbox}
+        liveCount={5}
+        liveLabel="2 running, 3 queued"
+      />,
+    );
+
+    expect(link().getAttribute("aria-label")).toBe("Dashboard, 2 running, 3 queued");
+  });
 });

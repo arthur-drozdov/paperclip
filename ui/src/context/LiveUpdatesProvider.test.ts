@@ -1148,6 +1148,18 @@ describe("applyRunLifecycleToCompanyLiveRuns", () => {
     }));
   });
 
+  it("removes scheduled retries from the live list because the API only returns queued and running runs", () => {
+    const { client, read } = makeClient([{ id: "run-1", status: "queued" }, { id: "run-2", status: "running" }]);
+    const patched = __liveUpdatesTestUtils.applyRunLifecycleToCompanyLiveRuns(
+      client as never,
+      "company-1",
+      { runId: "run-1", status: "scheduled_retry" },
+    );
+
+    expect(patched).toBe(true);
+    expect(read()).toEqual([{ id: "run-2", status: "running" }]);
+  });
+
   it("patches status in place for a run already in the list", () => {
     const { client, read } = makeClient([{ id: "run-1", status: "queued" }]);
     const patched = __liveUpdatesTestUtils.applyRunLifecycleToCompanyLiveRuns(

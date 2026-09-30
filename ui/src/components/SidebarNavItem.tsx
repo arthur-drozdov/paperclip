@@ -56,6 +56,8 @@ interface SidebarNavItemProps {
   textBadgeTone?: "default" | "amber";
   alert?: boolean;
   liveCount?: number;
+  /** Plain-language breakdown of queued and running work for live-count rows. */
+  liveLabel?: string;
   /**
    * Overrides NavLink's own route matching for rows whose active state is
    * computed externally (agent rows match `/agents/:ref` across tab suffixes).
@@ -84,6 +86,7 @@ export function SidebarNavItem({
   textBadgeTone = "default",
   alert = false,
   liveCount,
+  liveLabel,
   active,
   trailing,
   trailingLabel,
@@ -104,7 +107,7 @@ export function SidebarNavItem({
   // Accessible text equivalent for the collapsed dot indicator. The visible
   // label is `sr-only` in the rail, so the count must be surfaced here.
   const railStatusText = hasLive
-    ? `${liveCount} live`
+    ? liveLabel ?? `${liveCount} live`
     : hasBadge
       ? `${badge}${badgeLabel ? ` ${badgeLabel}` : ""}`
       : alert
@@ -185,7 +188,7 @@ export function SidebarNavItem({
                 <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-600 dark:bg-blue-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600 dark:bg-blue-400" />
               </span>
-              <span className="text-(length:--text-micro) font-medium text-blue-600 dark:text-blue-400">{liveCount} live</span>
+              <span className="text-(length:--text-micro) font-medium text-blue-600 dark:text-blue-400">{liveLabel ?? `${liveCount} live`}</span>
             </>
           )}
         </span>

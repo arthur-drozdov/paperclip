@@ -888,14 +888,16 @@ function applyRunLifecycleToCompanyLiveRuns(
     },
   );
 
-  if (TERMINAL_RUN_STATUSES.has(status)) {
+  // Keep this event-sourced cache aligned with GET /companies/:id/live-runs,
+  // which contains only queued/running rows. A scheduled retry has a future
+  // wake time; it is not live work and must leave the dashboard count now.
+  if (status !== "queued" && status !== "running") {
     queryClient.setQueryData(
       queryKeys.liveRuns(companyId),
       (current: LiveRunForIssue[] | undefined) => removeRunFromList(current, runId),
     );
-    // Always "handled": a terminal run must never be in the live list, so if it
-    // wasn't present there is deliberately nothing to refetch (removeRunFromList
-    // was a no-op and we must not re-add it).
+    // Always "handled": statuses outside the API's queued/running set must
+    // never be in the live list, so there is nothing to refetch if absent.
     return true;
   }
 
