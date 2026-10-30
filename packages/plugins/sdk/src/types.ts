@@ -1483,6 +1483,7 @@ export interface PluginIssuesClient {
     offset?: number;
   }): Promise<Issue[]>;
   get(issueId: string, companyId: string): Promise<Issue | null>;
+  /** Create as the plugin. Worker-supplied attribution is not authenticated delegation. */
   create(input: {
     companyId: string;
     projectId?: string;
@@ -1501,14 +1502,20 @@ export interface PluginIssuesClient {
     surfaceVisibility?: IssueSurfaceVisibility;
     originKind?: PluginIssueOriginKind;
     originId?: string | null;
+    /** @deprecated Non-null run provenance is rejected for plugin issue creation. */
     originRunId?: string | null;
     blockedByIssueIds?: string[];
     labelIds?: string[];
     executionWorkspaceId?: string | null;
     executionWorkspacePreference?: string | null;
     executionWorkspaceSettings?: Record<string, unknown> | null;
+    /** @deprecated Non-null actor IDs are rejected; use plugin-origin identity instead. */
     actor?: PluginIssueMutationActor;
   }): Promise<Issue>;
+  /**
+   * Update as the plugin. Worker-supplied attribution is not authenticated
+   * delegation; non-null actor IDs and patch.originRunId are rejected.
+   */
   update(
     issueId: string,
     patch: Partial<Pick<
@@ -1532,6 +1539,7 @@ export interface PluginIssuesClient {
       executionWorkspaceSettings?: Record<string, unknown> | null;
     },
     companyId: string,
+    /** @deprecated Non-null actor IDs are rejected; use plugin-origin identity instead. */
     actor?: PluginIssueMutationActor,
   ): Promise<Issue>;
   assertCheckoutOwner(input: {

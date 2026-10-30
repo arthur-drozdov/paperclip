@@ -28,7 +28,7 @@ describeDb("plugin issue actor boundary", () => {
     const pluginId = "plugin-record-id";
     const services = buildHostServices(db, pluginId, "paperclip.test-plugin", eventBus);
     const forged = randomUUID();
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId", "authorizationActor", "options"]) {
       await expect(services.issues.create({ companyId, title: "Rejected", [key]: forged } as any)).rejects.toThrow("not authenticated");
     }
     expect(await db.select().from(issues)).toEqual([]);
@@ -40,7 +40,7 @@ describeDb("plugin issue actor boundary", () => {
     expect(issue).toMatchObject({ companyId, createdByAgentId: null, createdByUserId: null, originRunId: null });
     const eventsBefore = await db.select().from(activityLog).where(eq(activityLog.entityId, issue.id));
     expect(eventsBefore).toEqual(expect.arrayContaining([expect.objectContaining({ actorType: "plugin", actorId: pluginId })]));
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy", "authorizationActor", "options"]) {
       await expect(services.issues.update({ companyId, issueId: issue.id, patch: { title: "Rejected", [key]: forged } })).rejects.toThrow("not authenticated");
     }
     expect(await db.select().from(activityLog).where(eq(activityLog.entityId, issue.id))).toEqual(eventsBefore);
