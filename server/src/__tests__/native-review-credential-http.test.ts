@@ -3,7 +3,7 @@ import express from "express";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { agentApiKeys, agents, companies, companyMemberships, completionContracts, createDb, heartbeatRuns, issueThreadInteractions, issues, nativeRunResults, statusDecisionEffects, statusDecisions, workAssessments } from "@paperclipai/db";
+import { agentApiKeys, agents, authUsers, companies, companyMemberships, completionContracts, createDb, heartbeatRuns, issueThreadInteractions, issues, nativeRunResults, statusDecisionEffects, statusDecisions, workAssessments } from "@paperclipai/db";
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { actorMiddleware } from "../middleware/auth.js";
 import { errorHandler } from "../middleware/error-handler.js";
@@ -44,15 +44,16 @@ suite("native completion review HTTP credentials", () => {
   async function fixture(targetKey = "native_completion_review", board = false) {
     const companyId = randomUUID(), issueId = randomUUID(), interactionId = randomUUID(), decisionId = randomUUID();
     const userId = `reviewer-${randomUUID()}`;
+    await db.insert(authUsers).values({ id: userId, name: "Test owner", email: `${userId}@example.test`, createdAt: new Date(), updatedAt: new Date() });
     await db.insert(companies).values({ id: companyId, name: "Test", issuePrefix: `T${companyId.slice(0, 6).toUpperCase()}` });
     await db.insert(companyMemberships).values({ companyId, principalType: "user", principalId: userId, status: "active", membershipRole: "owner" });
     const [worker, reviewer] = await db.insert(agents).values([
-      { companyId, name: "Worker", role: "engineer", status: "idle", adapterType: "process", adapterConfig: {}, permissions: {} },
-      { companyId, name: "Reviewer", role: "engineer", status: "idle", adapterType: "process", adapterConfig: {}, permissions: {} },
+      { companyId, name: "Worker", role: "engineer", status: "idle", adapterType: "process", adapterConfig: {}, permissions: {}, createdByUserId: userId },
+      { companyId, name: "Reviewer", role: "engineer", status: "idle", adapterType: "process", adapterConfig: {}, permissions: {}, createdByUserId: userId },
     ]).returning();
-    await db.insert(issues).values({ id: issueId, companyId, title: "Review", status: "in_review", statusVersion: 3, assigneeAgentId: targetKey === "native_completion_review" ? worker!.id : reviewer!.id });
+    await db.insert(issues).values({ id: issueId, companyId, title: "Review", status: "in_review", statusVersion: 3, responsibleUserId: userId, assigneeAgentId: targetKey === "native_completion_review" ? worker!.id : reviewer!.id });
     const [contract] = await db.insert(completionContracts).values({ companyId, issueId, revision: 1, schemaVersion: "paperclip.completion-contract.v1", policyVersion: "test", risk: "low", completionAuthority: "agent", incompleteCriteriaPolicy: "block", contractJson: {}, canonicalSha256: randomUUID(), createdByActorType: "user", createdByActorId: userId }).returning();
-    const [source] = await db.insert(heartbeatRuns).values({ companyId, agentId: worker!.id, nativeIssueId: issueId, runtimeMode: "native", status: "succeeded", completionContractId: contract!.id, completionContractSha256: contract!.canonicalSha256 }).returning();
+    const [source] = await db.insert(heartbeatRuns).values({ companyId, agentId: worker!.id, nativeIssueId: issueId, runtimeMode: "native", status: "succeeded", responsibleUserId: userId, completionContractId: contract!.id, completionContractSha256: contract!.canonicalSha256 }).returning();
     const [result] = await db.insert(nativeRunResults).values({ companyId, issueId, runId: source!.id, completionContractId: contract!.id, serverFingerprint: randomUUID(), schemaStatus: "accepted", resultJson: {}, canonicalSha256: randomUUID() }).returning();
     const [assessment] = await db.insert(workAssessments).values({ companyId, issueId, runId: source!.id, contractId: contract!.id, resultId: result!.id, triggerKind: "native_result", triggerActorCompanyId: companyId, priorIssueStatus: "in_progress", priorStatusVersion: 2, policyVersion: "test", assessmentJson: {}, inputDigest: randomUUID() }).returning();
     await db.insert(statusDecisions).values({ id: decisionId, companyId, issueId, runId: source!.id, assessmentId: assessment!.id, decisionVersion: 1, policyVersion: "test", fromStatus: "in_progress", toStatus: "in_review", reasonCode: "explicit_review", decisionJson: { projectedStatusVersion: 3 }, decisionDigest: randomUUID(), applicationState: "applied" });
@@ -77,11 +78,11 @@ suite("native completion review HTTP credentials", () => {
     expect(await db.select().from(statusDecisionEffects).where(eq(statusDecisionEffects.decisionId, f.decisionId))).toEqual(before);
   });
 
-  it("accepts a current review with a signed run credential", async () => {
+  it.each(["accept", "reject"])("resolves a current review with a signed run credential: %s", async (action) => {
     const f = await fixture();
-    const response = await request(app).post(`/api/issues/${f.issueId}/interactions/${f.interactionId}/accept`).set("Authorization", `Bearer ${f.jwt}`).set("X-Paperclip-Run-Id", f.runId).send({});
+    const response = await request(app).post(`/api/issues/${f.issueId}/interactions/${f.interactionId}/${action}`).set("Authorization", `Bearer ${f.jwt}`).set("X-Paperclip-Run-Id", f.runId).send(action === "reject" ? { reason: "Changes needed" } : {});
     expect(response.status).toBe(200);
-    expect((await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, f.interactionId)))[0]?.status).toBe("accepted");
+    expect((await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, f.interactionId)))[0]?.status).toBe(action === "accept" ? "accepted" : "rejected");
   });
 
   it("rejects a signed token with a different run header in middleware", async () => {
