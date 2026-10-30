@@ -1927,18 +1927,14 @@ export interface WorkerToHostMethods {
       surfaceVisibility?: string | null;
       originKind?: string | null;
       originId?: string | null;
-      /** @deprecated Non-null run provenance is rejected for plugin issue creation. */
       originRunId?: string | null;
       blockedByIssueIds?: string[];
       labelIds?: string[];
       executionWorkspaceId?: string | null;
       executionWorkspacePreference?: string | null;
       executionWorkspaceSettings?: Record<string, unknown> | null;
-      /** @deprecated Worker attribution is not authenticated delegation; use plugin-origin identity. */
       actorAgentId?: string | null;
-      /** @deprecated Worker attribution is not authenticated delegation; use plugin-origin identity. */
       actorUserId?: string | null;
-      /** @deprecated Worker attribution is not authenticated delegation; use plugin-origin identity. */
       actorRunId?: string | null;
     },
     result: Issue,
@@ -1946,7 +1942,6 @@ export interface WorkerToHostMethods {
   "issues.update": [
     params: {
       issueId: string;
-      /** Actor attribution and originRunId are rejected; updates run as the plugin. */
       patch: Record<string, unknown>;
       companyId: string;
     },

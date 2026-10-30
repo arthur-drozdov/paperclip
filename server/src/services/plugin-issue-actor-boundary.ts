@@ -1,13 +1,9 @@
-// SDK compatibility: issue create/update currently expose actor attribution fields.
-// A worker-supplied ID is not authenticated delegation. Reject these fields
-// until a host-issued, scoped delegation contract exists; do not impersonate.
 const common = [
   "actorAgentId", "actorUserId", "actorRunId", "actorRunStopId",
   "actorPrincipalType", "actorResponsibleUserId", "trustExplicitResponsibleUserId",
   "createdByAgentId", "createdByUserId", "originRunId", "watchdogActorRunId",
   "checkoutRunId", "executionRunId", "originIdentityContextId", "continuationIdentityContextId",
   "authorizationActor", "bindRuntimeSharedWorkspace", "options",
-  // Host-owned context added to issue services on current master.
   "workspaceSelectionActor", "workspaceSelection", "workspaceSelectionSource", "conversationHandoff", "caseHandoffId",
 ] as const;
 
