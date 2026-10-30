@@ -28,7 +28,7 @@ describeDb("plugin issue actor boundary", () => {
     const pluginId = "plugin-record-id";
     const services = buildHostServices(db, pluginId, "paperclip.test-plugin", eventBus);
     const forged = randomUUID();
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId", "authorizationActor", "options", "workspaceSelectionActor", "workspaceSelection", "conversationHandoff"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "responsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId", "authorizationActor", "options", "workspaceSelectionActor", "workspaceSelection", "conversationHandoff"]) {
       await expect(services.issues.create({ companyId, title: "Rejected", [key]: forged } as any)).rejects.toThrow("not authenticated");
     }
     await expect(services.issues.create({ companyId, title: "Rejected", workspaceSelectionActor: { type: "board", userId: forged } } as any)).rejects.toThrow("not authenticated");
@@ -41,7 +41,7 @@ describeDb("plugin issue actor boundary", () => {
     expect(issue).toMatchObject({ companyId, createdByAgentId: null, createdByUserId: null, originRunId: null });
     const eventsBefore = await db.select().from(activityLog).where(eq(activityLog.entityId, issue.id));
     expect(eventsBefore).toEqual(expect.arrayContaining([expect.objectContaining({ actorType: "plugin", actorId: pluginId })]));
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion", "authorizationActor", "options", "workspaceSelectionActor", "caseHandoffId"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "responsibleUserId", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion", "authorizationActor", "options", "workspaceSelectionActor", "caseHandoffId"]) {
       await expect(services.issues.update({ companyId, issueId: issue.id, patch: { title: "Rejected", [key]: forged } })).rejects.toThrow("not authenticated");
     }
     await expect(services.issues.update({ companyId, issueId: issue.id, patch: { workspaceSelectionActor: { type: "board", userId: forged } } })).rejects.toThrow("not authenticated");
@@ -51,6 +51,11 @@ describeDb("plugin issue actor boundary", () => {
     await expect(services.issues.get({ companyId: otherCompanyId, issueId: issue.id })).resolves.toBeNull();
     await expect(services.issues.update({ companyId, issueId: issue.id, patch: { title: "Updated" } })).resolves.toMatchObject({ title: "Updated", companyId });
     await expect(services.issues.get({ companyId, issueId: issue.id })).resolves.toMatchObject({ title: "Updated" });
+    const parentId = randomUUID();
+    await db.insert(issues).values({ id: parentId, companyId, title: "Parent", responsibleUserId: "parent-user" });
+    const child = await services.issues.create({ companyId, parentId, title: "Child" });
+    expect(child.responsibleUserId).toBe("parent-user");
+    await expect(services.issues.update({ companyId, issueId: child.id, patch: { title: "Child updated", responsibleUserId: null } })).resolves.toMatchObject({ title: "Child updated", responsibleUserId: "parent-user" });
     services.dispose();
   });
 });

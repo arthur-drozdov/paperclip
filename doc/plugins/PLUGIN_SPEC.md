@@ -707,7 +707,7 @@ Origin rules:
 - The host derives the default plugin origin from the installed plugin key and rejects attempts to set `plugin:<otherPluginKey>` origins.
 - `originId` is plugin-defined and should be stable for idempotent generated work.
 - Issue create and update use plugin-origin identity. The host rejects non-null
-  worker-supplied actor IDs and `originRunId`: these are not authenticated
+  worker-supplied actor IDs, `originRunId`, and explicit `responsibleUserId`: these are not authenticated
   delegation. Optional SDK fields remain for source compatibility. Callers that
   previously supplied them must omit them or use null. A future host-issued
   scoped delegation contract would be separate from this API.

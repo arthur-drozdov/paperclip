@@ -1641,7 +1641,7 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
       },
       async create(input) {
         requireCapability(manifest, capabilitySet, "issues.create");
-        for (const [key, value] of Object.entries({ actorAgentId: input.actor?.actorAgentId, actorUserId: input.actor?.actorUserId, actorRunId: input.actor?.actorRunId, originRunId: input.originRunId })) {
+        for (const [key, value] of Object.entries({ actorAgentId: input.actor?.actorAgentId, actorUserId: input.actor?.actorUserId, actorRunId: input.actor?.actorRunId, originRunId: input.originRunId, responsibleUserId: (input as unknown as Record<string, unknown>).responsibleUserId })) {
           if (value != null) throw new Error(`Plugin-supplied ${key} is not authenticated; trusted delegation is unavailable`);
         }
         const now = new Date();
@@ -1698,12 +1698,13 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
       },
       async update(issueId, patch, companyId, actor) {
         requireCapability(manifest, capabilitySet, "issues.update");
-        for (const [key, value] of Object.entries({ actorAgentId: actor?.actorAgentId, actorUserId: actor?.actorUserId, actorRunId: actor?.actorRunId, originRunId: patch.originRunId })) {
+        for (const [key, value] of Object.entries({ actorAgentId: actor?.actorAgentId, actorUserId: actor?.actorUserId, actorRunId: actor?.actorRunId, originRunId: patch.originRunId, responsibleUserId: (patch as Record<string, unknown>).responsibleUserId })) {
           if (value != null) throw new Error(`Plugin-supplied ${key} is not authenticated; trusted delegation is unavailable`);
         }
         const record = issues.get(issueId);
         if (!isInCompany(record, companyId)) throw new Error(`Issue not found: ${issueId}`);
         const { blockedByIssueIds: nextBlockedByIssueIds, originRunId: _originRunId, ...issuePatch } = patch;
+        delete (issuePatch as Record<string, unknown>).responsibleUserId;
         if (issuePatch.originKind !== undefined) {
           issuePatch.originKind = normalizePluginOriginKind(issuePatch.originKind);
         }

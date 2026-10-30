@@ -1,6 +1,6 @@
 const common = [
   "actorAgentId", "actorUserId", "actorRunId", "actorRunStopId",
-  "actorPrincipalType", "actorResponsibleUserId", "trustExplicitResponsibleUserId",
+  "actorPrincipalType", "actorResponsibleUserId", "responsibleUserId", "trustExplicitResponsibleUserId",
   "createdByAgentId", "createdByUserId", "originRunId", "watchdogActorRunId",
   "checkoutRunId", "executionRunId", "originIdentityContextId", "continuationIdentityContextId",
   "authorizationActor", "bindRuntimeSharedWorkspace", "options",

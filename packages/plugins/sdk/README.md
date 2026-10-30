@@ -581,7 +581,7 @@ If `originKind` is omitted, the host stores `plugin:<pluginKey>`. Plugins may us
 
 Issue creation and updates use plugin-origin identity. Worker-supplied IDs are
 not authenticated delegation. The host rejects non-null `actorAgentId`,
-`actorUserId`, `actorRunId`, and `originRunId` for these operations. The SDK
+`actorUserId`, `actorRunId`, `originRunId`, and explicit `responsibleUserId` for these operations. The SDK
 keeps the optional fields for source compatibility, but plugins must omit them
 or pass null. This changes runtime behavior for callers that previously supplied
 them. Host-issued scoped delegation would require a separate contract; no such

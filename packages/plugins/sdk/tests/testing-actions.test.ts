@@ -102,9 +102,11 @@ describe("createTestHarness issue interactions", () => {
     const harness = createTestHarness({ manifest, capabilities: ["issues.create", "issues.update"] });
     await expect(harness.ctx.issues.create({ companyId: "company-1", title: "Rejected", actor: { actorUserId: "user-1" } })).rejects.toThrow("not authenticated");
     await expect(harness.ctx.issues.create({ companyId: "company-1", title: "Rejected", originRunId: "run-1" })).rejects.toThrow("not authenticated");
+    await expect(harness.ctx.issues.create({ companyId: "company-1", title: "Rejected", responsibleUserId: "user-1" } as any)).rejects.toThrow("not authenticated");
     const issue = await harness.ctx.issues.create({ companyId: "company-1", title: "Plugin issue", actor: { actorUserId: null } });
     await expect(harness.ctx.issues.update(issue.id, { title: "Rejected" }, "company-1", { actorRunId: "run-1" })).rejects.toThrow("not authenticated");
     await expect(harness.ctx.issues.update(issue.id, { originRunId: "run-1" }, "company-1")).rejects.toThrow("not authenticated");
+    await expect(harness.ctx.issues.update(issue.id, { responsibleUserId: "user-1" } as any, "company-1")).rejects.toThrow("not authenticated");
     await expect(harness.ctx.issues.update(issue.id, { title: "Updated" }, "company-1")).resolves.toMatchObject({ title: "Updated" });
   });
 
