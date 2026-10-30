@@ -8,11 +8,11 @@ test("rejects worker attribution and internal overrides", () => {
       assert.throws(() => rejectPluginIssueActorClaims({ [key]: "forged" }, operation), /not authenticated/);
     }
   }
-  for (const key of ["companyId", "companyGuard", "expectedExecutionPolicy"]) {
+  for (const key of ["companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion"]) {
     assert.throws(() => rejectPluginIssueActorClaims({ [key]: "forged" }, "update"), /not authenticated/);
   }
   for (const operation of ["create", "update"]) {
-    for (const key of ["authorizationActor", "bindRuntimeSharedWorkspace", "options"]) {
+    for (const key of ["authorizationActor", "bindRuntimeSharedWorkspace", "options", "workspaceSelectionActor", "workspaceSelection", "workspaceSelectionSource", "conversationHandoff", "caseHandoffId"]) {
       assert.throws(() => rejectPluginIssueActorClaims({ [key]: { authorizationActor: { type: "user", userId: "forged" } } }, operation), /not authenticated/);
     }
   }

@@ -28,9 +28,10 @@ describeDb("plugin issue actor boundary", () => {
     const pluginId = "plugin-record-id";
     const services = buildHostServices(db, pluginId, "paperclip.test-plugin", eventBus);
     const forged = randomUUID();
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId", "authorizationActor", "options"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "originRunId", "actorResponsibleUserId", "trustExplicitResponsibleUserId", "watchdogActorRunId", "authorizationActor", "options", "workspaceSelectionActor", "workspaceSelection", "conversationHandoff"]) {
       await expect(services.issues.create({ companyId, title: "Rejected", [key]: forged } as any)).rejects.toThrow("not authenticated");
     }
+    await expect(services.issues.create({ companyId, title: "Rejected", workspaceSelectionActor: { type: "board", userId: forged } } as any)).rejects.toThrow("not authenticated");
     expect(await db.select().from(issues)).toEqual([]);
     expect(await db.select().from(activityLog)).toEqual([]);
     const [before] = await db.select().from(companies).where(eq(companies.id, companyId));
@@ -40,9 +41,10 @@ describeDb("plugin issue actor boundary", () => {
     expect(issue).toMatchObject({ companyId, createdByAgentId: null, createdByUserId: null, originRunId: null });
     const eventsBefore = await db.select().from(activityLog).where(eq(activityLog.entityId, issue.id));
     expect(eventsBefore).toEqual(expect.arrayContaining([expect.objectContaining({ actorType: "plugin", actorId: pluginId })]));
-    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy", "authorizationActor", "options"]) {
+    for (const key of ["actorUserId", "actorAgentId", "actorRunId", "actorRunStopId", "actorPrincipalType", "originRunId", "createdByUserId", "companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion", "authorizationActor", "options", "workspaceSelectionActor", "caseHandoffId"]) {
       await expect(services.issues.update({ companyId, issueId: issue.id, patch: { title: "Rejected", [key]: forged } })).rejects.toThrow("not authenticated");
     }
+    await expect(services.issues.update({ companyId, issueId: issue.id, patch: { workspaceSelectionActor: { type: "board", userId: forged } } })).rejects.toThrow("not authenticated");
     expect(await db.select().from(activityLog).where(eq(activityLog.entityId, issue.id))).toEqual(eventsBefore);
     expect((await db.select().from(issues).where(eq(issues.id, issue.id)))[0]).toMatchObject({ title: "Plugin issue", companyId });
     await expect(services.issues.update({ companyId: otherCompanyId, issueId: issue.id, patch: { title: "Wrong tenant" } })).rejects.toThrow();

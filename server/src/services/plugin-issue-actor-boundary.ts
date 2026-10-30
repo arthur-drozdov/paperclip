@@ -7,6 +7,8 @@ const common = [
   "createdByAgentId", "createdByUserId", "originRunId", "watchdogActorRunId",
   "checkoutRunId", "executionRunId", "originIdentityContextId", "continuationIdentityContextId",
   "authorizationActor", "bindRuntimeSharedWorkspace", "options",
+  // Host-owned context added to issue services on current master.
+  "workspaceSelectionActor", "workspaceSelection", "workspaceSelectionSource", "conversationHandoff", "caseHandoffId",
 ] as const;
 
 export function rejectPluginIssueActorClaims(
@@ -14,7 +16,7 @@ export function rejectPluginIssueActorClaims(
   operation: "create" | "update",
 ): void {
   const forbidden: readonly string[] = operation === "update"
-    ? [...common, "companyId", "companyGuard", "expectedExecutionPolicy"]
+    ? [...common, "companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion"]
     : common;
   for (const key of forbidden) {
     if (input[key] !== undefined && input[key] !== null) {
@@ -25,6 +27,6 @@ export function rejectPluginIssueActorClaims(
 
 export function stripPluginIssueUpdateOverrides(input: Record<string, unknown>): Record<string, unknown> {
   const result = { ...input };
-  for (const key of [...common, "companyId", "companyGuard", "expectedExecutionPolicy"]) delete result[key];
+  for (const key of [...common, "companyId", "companyGuard", "expectedExecutionPolicy", "expectedStatusVersion"]) delete result[key];
   return result;
 }
